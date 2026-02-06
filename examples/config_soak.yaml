@@ -1,0 +1,14 @@
+# Soak / endurance test: sustained load over long period.
+# Use to find memory leaks, connection pool exhaustion, degradation over time.
+# Run: deli -f examples/config_soak.yaml -c examples/sample_collection.json
+
+users: 40
+ramp_up_seconds: 60
+duration_seconds: 3600
+iterations: 0
+think_time_ms: 150
+scenario: constant
+
+# Optional SLA for soak (e.g. no degradation)
+# sla_p95_ms: 800
+# sla_error_rate_pct: 0.5

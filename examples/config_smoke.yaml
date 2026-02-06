@@ -1,0 +1,14 @@
+# Smoke test: minimal load, quick validation that the app responds.
+# Use after deploy or before heavier tests. Industry: first check in CI/CD.
+# Run: deli -f examples/config_smoke.yaml -c examples/sample_collection.json
+
+users: 5
+ramp_up_seconds: 2
+duration_seconds: 30
+iterations: 0
+think_time_ms: 200
+scenario: constant
+
+# Optional SLA: fail fast if basics are broken
+sla_p95_ms: 2000
+sla_error_rate_pct: 1.0

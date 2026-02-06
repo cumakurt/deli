@@ -1,0 +1,6 @@
+users: 100
+ramp_up_seconds: 2
+duration_seconds: 5
+iterations: 0
+think_time_ms: 100
+scenario: constant

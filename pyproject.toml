@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deli"
+version = "1.0.0"
+description = "Lightweight load execution engine. Speed and performance first. Postman Collection v2.1, async HTTP/2, load and stress testing."
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "Cuma Kurt", email = "cumakurt@gmail.com" }
+]
+keywords = ["load-testing", "performance", "postman", "async", "http2"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "httpx[http2]>=0.27.0",
+    "uvloop>=0.19.0",
+    "orjson>=3.9.0",
+    "pyyaml>=6.0",
+    "rich>=13.7.0",
+    "jinja2>=3.1.0",
+    "tdigest>=0.5.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23.0", "ruff>=0.1.0"]
+
+[project.urls]
+Homepage = "https://github.com/cumakurt/deli"
+Documentation = "https://github.com/cumakurt/deli#readme"
+Repository = "https://github.com/cumakurt/deli"
+
+[project.scripts]
+deli = "deli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["deli*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

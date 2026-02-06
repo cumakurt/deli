@@ -1,0 +1,36 @@
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Build and install
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Generated reports (do not commit)
+report.html
+stress_report.html
+*.xml
+reports/
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local config (optional; keep examples in repo)
+# config.yaml
+# stress_config.yaml

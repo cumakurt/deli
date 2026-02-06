@@ -1,0 +1,15 @@
+# Baseline load test: simulate normal expected traffic.
+# Use to establish performance baseline and catch regressions.
+# Run: deli -f examples/config_load_baseline.yaml -c examples/sample_collection.json
+
+users: 50
+ramp_up_seconds: 15
+duration_seconds: 300
+iterations: 0
+think_time_ms: 100
+scenario: constant
+
+# Optional SLA: typical production targets
+# sla_p95_ms: 500
+# sla_p99_ms: 1000
+# sla_error_rate_pct: 0.5

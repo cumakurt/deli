@@ -1,0 +1,17 @@
+# Spike test: sudden traffic surge (e.g. flash sale, viral event).
+# Baseline users + spike_users during spike window; validates recovery.
+# Run: deli -f examples/config_spike.yaml -c examples/sample_collection.json
+
+users: 30
+ramp_up_seconds: 10
+duration_seconds: 180
+iterations: 0
+think_time_ms: 100
+scenario: spike
+
+# Extra users during spike window (mid-test)
+spike_users: 120
+spike_duration_seconds: 20
+
+sla_p95_ms: 1500
+sla_error_rate_pct: 2.0

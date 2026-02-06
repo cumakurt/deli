@@ -1,0 +1,11 @@
+# Ruff configuration for deli (CI and local lint)
+target-version = "py311"
+line-length = 100
+exclude = ["deli.egg-info", ".venv", "build"]
+
+[lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[lint.isort]
+known-first-party = ["deli"]

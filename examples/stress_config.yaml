@@ -1,0 +1,11 @@
+# Stress test (short run for examples)
+sla_p95_ms: 2000
+sla_p99_ms: 3000
+sla_error_rate_pct: 5.0
+sla_timeout_rate_pct: 10.0
+initial_users: 20
+step_users: 2
+step_interval_seconds: 10
+max_users: 20
+think_time_ms: 0
+scenario: linear_overload

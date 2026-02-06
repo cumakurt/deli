@@ -1,0 +1,13 @@
+.venv
+__pycache__
+*.pyc
+.git
+.gitignore
+.pytest_cache
+*.egg-info
+.eggs
+build
+dist
+report.html
+stress_report.html
+*.md

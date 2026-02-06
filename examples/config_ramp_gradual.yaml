@@ -1,0 +1,14 @@
+# Ramp-up / gradual load test: smooth increase from 0 to target users.
+# Use to observe behavior as load grows and find soft limits.
+# Run: deli -f examples/config_ramp_gradual.yaml -c examples/sample_collection.json
+
+users: 100
+ramp_up_seconds: 120
+duration_seconds: 420
+iterations: 0
+think_time_ms: 100
+scenario: gradual
+
+# Full load is reached after ramp_up_seconds, then sustained for (duration - ramp)
+sla_p95_ms: 800
+sla_error_rate_pct: 1.0

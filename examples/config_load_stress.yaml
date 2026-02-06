@@ -1,0 +1,14 @@
+# High load test: push toward capacity without full stress runner.
+# Use to see how the system behaves under heavy constant load.
+# Run: deli -f examples/config_load_stress.yaml -c examples/sample_collection.json
+
+users: 200
+ramp_up_seconds: 30
+duration_seconds: 600
+iterations: 0
+think_time_ms: 50
+scenario: constant
+
+sla_p95_ms: 1000
+sla_p99_ms: 2000
+sla_error_rate_pct: 2.0
