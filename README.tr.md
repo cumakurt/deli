@@ -1,16 +1,18 @@
-# deli
+# deli 🥪
 
-Python için hafif **yük çalıştırma motoru**. **Hız ve performans öncelikli** — framework değil: minimal soyutlama, doğrudan çalıştırma, sınırlı bellek. **Postman Collection v2.1**, asenkron HTTP/2, yük ve stres modu, HTML raporları desteklenir.
-
-- **Çalıştırma motoru**: Çalışma başına tek client, yüksek bağlantı limiti, hızlı tüketim, düşük ek yük
-- **Yığın**: asyncio + httpx (HTTP/2) + uvloop, raporlar için orjson
-- **Yük testi**: YAML config (kullanıcı, ramp-up, süre, senaryo), constant/gradual/spike
-- **Stres testi** (`-s`): Eşik aşılana kadar fazlı ramp; kırılma noktası, bozulma tespiti
-- **Raporlar**: HTML (ECharts), JUnit, JSON
-
-Yerel ve Docker içinde çalışır (durumsuz, konteyner dostu).
+**deli**, yüksek performanslı, hafif ve modern bir yük testi (load testing) motorudur. Hız, düşük kaynak tüketimi ve geliştirici deneyimine odaklanır.
 
 **Dil:** [Türkçe](README.tr.md) | [English](README.md)
+
+---
+
+- **Çalıştırma motoru:** Çalışma başına tek client, yüksek bağlantı limiti, hızlı tüketim, düşük ek yük
+- **Yığın:** asyncio + httpx (HTTP/2) + uvloop, raporlar için orjson
+- **Yük testi:** YAML config (kullanıcı, ramp-up, süre, senaryo), constant/gradual/spike
+- **Stres testi** (`-s`): Eşik aşılana kadar fazlı ramp; kırılma noktası, bozulma tespiti
+- **Raporlar:** HTML (ECharts), JUnit, JSON
+
+Yerel ve Docker içinde çalışır (durumsuz, konteyner dostu).
 
 ---
 
