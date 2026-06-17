@@ -151,3 +151,39 @@ def test_generate_junit_report_with_failure(tmp_path: Path) -> None:
     xml = out.read_text(encoding="utf-8")
     assert "<failure" in xml
     assert "SLA" in xml
+
+
+def test_json_and_junit_fail_on_request_errors_without_sla(tmp_path: Path) -> None:
+    config = RunConfig(
+        users=1,
+        ramp_up_seconds=0,
+        duration_seconds=1,
+        iterations=1,
+        think_time_ms=0,
+        scenario=LoadScenario.CONSTANT,
+    )
+    c = MetricsCollector(max_results=1000)
+    c.add(
+        RequestResult(
+            request_name="r",
+            folder_path="",
+            method="GET",
+            url="https://example.com/",
+            status_code=500,
+            response_time_ms=50,
+            success=False,
+            timestamp=0,
+        )
+    )
+    c.set_end_time(1.0)
+
+    json_out = tmp_path / "failed.json"
+    junit_out = tmp_path / "failed.xml"
+    generate_json_report(json_out, c, config, collection_name="Test")
+    generate_junit_report(junit_out, c, config, collection_name="Test")
+
+    data = json.loads(json_out.read_text(encoding="utf-8"))
+    xml = junit_out.read_text(encoding="utf-8")
+    assert data["passed"] is False
+    assert "<failure" in xml
+    assert "request(s) failed" in xml

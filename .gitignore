@@ -20,8 +20,8 @@ dist/
 .eggs/
 
 # Generated reports (do not commit)
-report.html
-stress_report.html
+/report.html
+/stress_report.html
 *.xml
 reports/
 

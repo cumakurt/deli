@@ -45,7 +45,7 @@ def build_metrics_table(
 
     expected = expected_active_users(config, elapsed_seconds)
     table.add_row("Active users (expected)", str(expected))
-    table.add_row("Total requests", str(len(collector.results)))
+    table.add_row("Total requests", str(collector.total_added))
 
     if agg:
         table.add_row("TPS", f"{agg.tps:.1f}")

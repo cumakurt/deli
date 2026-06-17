@@ -18,7 +18,28 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from tdigest import TDigest
+try:
+    from tdigest import TDigest
+except ImportError:  # pragma: no cover - exercised when optional dependency is absent
+
+    class TDigest:  # type: ignore[no-redef]
+        """Small exact-percentile fallback used when tdigest is not installed.
+
+        The package declares tdigest as a dependency, so production installs should
+        use the streaming implementation. Keeping this fallback prevents a missing
+        optional wheel in dev/test environments from making the whole CLI unusable.
+        """
+
+        __slots__ = ("_values",)
+
+        def __init__(self) -> None:
+            self._values: list[float] = []
+
+        def update(self, value: float) -> None:
+            self._values.append(float(value))
+
+        def percentile(self, p: float) -> float:
+            return _percentile(sorted(self._values), p)
 
 from .logging_config import get_logger
 from .models import AggregateMetrics, RequestResult, RunConfig
@@ -50,6 +71,52 @@ class TimeSeriesPoint:
     active_requests: int
 
 
+class _EndpointStats:
+    """Streaming per-endpoint aggregate state."""
+
+    __slots__ = ("total", "success", "failed", "sum_times", "digest")
+
+    def __init__(self) -> None:
+        self.total = 0
+        self.success = 0
+        self.failed = 0
+        self.sum_times = 0.0
+        self.digest = TDigest()
+
+    def add(self, result: RequestResult) -> None:
+        self.total += 1
+        if result.success:
+            self.success += 1
+        else:
+            self.failed += 1
+        rt = result.response_time_ms
+        self.sum_times += rt
+        self.digest.update(rt)
+
+    def to_aggregate(self, duration_ms: float) -> AggregateMetrics:
+        if self.total == 0:
+            return AggregateMetrics(
+                total_requests=0,
+                successful_requests=0,
+                failed_requests=0,
+                total_duration_ms=duration_ms,
+            )
+
+        tps = 1000.0 * self.total / duration_ms if duration_ms > 0 else 0.0
+        return AggregateMetrics(
+            total_requests=self.total,
+            successful_requests=self.success,
+            failed_requests=self.failed,
+            total_duration_ms=duration_ms,
+            tps=tps,
+            avg_response_time_ms=self.sum_times / self.total,
+            p50_ms=_percentile_from_digest(self.digest, 50),
+            p95_ms=_percentile_from_digest(self.digest, 95),
+            p99_ms=_percentile_from_digest(self.digest, 99),
+            error_rate_pct=100.0 * self.failed / self.total,
+        )
+
+
 def _percentile_from_digest(digest: TDigest, p: float) -> float:
     """Get percentile from T-Digest. Returns 0.0 if empty."""
     try:
@@ -66,6 +133,12 @@ def _percentile(sorted_times: list[float], p: float) -> float:
     f = int(k)
     c = f + 1 if f + 1 < len(sorted_times) else f
     return sorted_times[f] + (k - f) * (sorted_times[c] - sorted_times[f])
+
+
+def _is_timeout_failure(result: RequestResult) -> bool:
+    return (not result.success) and (
+        result.status_code is None or "timeout" in (result.error or "").lower()
+    )
 
 
 def compute_aggregate(
@@ -162,6 +235,14 @@ class MetricsCollector:
         "_failed_count",
         "_status_counts",
         "_error_counts",
+        "_method_counts",
+        "_endpoint_stats",
+        "_timeout_count",
+        "_response_time_count",
+        "_min_response_time_ms",
+        "_max_response_time_ms",
+        "_mean_response_time_ms",
+        "_m2_response_time",
         "_overflow_count",
         "_overflow_warned",
         "_total_added",
@@ -183,6 +264,14 @@ class MetricsCollector:
         self._failed_count: int = 0
         self._status_counts: dict[str, int] = defaultdict(int)
         self._error_counts: dict[str, int] = defaultdict(int)  # Track specific error messages
+        self._method_counts: dict[str, int] = defaultdict(int)
+        self._endpoint_stats: dict[tuple[str, str], _EndpointStats] = {}
+        self._timeout_count: int = 0
+        self._response_time_count: int = 0
+        self._min_response_time_ms: float | None = None
+        self._max_response_time_ms: float | None = None
+        self._mean_response_time_ms: float = 0.0
+        self._m2_response_time: float = 0.0
         # Apdex counters (T = 500ms default)
         self._satisfied_count: int = 0  # < T
         self._tolerating_count: int = 0  # T < t < 4T
@@ -201,6 +290,38 @@ class MetricsCollector:
     def total_added(self) -> int:
         """Total number of results added (including overflowed)."""
         return self._total_added
+
+    @property
+    def timeout_count(self) -> int:
+        """Number of failed results classified as timeout/network timeout."""
+        return self._timeout_count
+
+    def method_counts(self) -> dict[str, int]:
+        """HTTP method distribution over all collected results, including overflowed items."""
+        return dict(self._method_counts)
+
+    def response_time_summary(self) -> tuple[float, float, float]:
+        """Return min, max, and population std-dev over all collected results."""
+        if self._response_time_count == 0:
+            return 0.0, 0.0, 0.0
+        variance = self._m2_response_time / self._response_time_count
+        return (
+            self._min_response_time_ms or 0.0,
+            self._max_response_time_ms or 0.0,
+            variance**0.5,
+        )
+
+    def _update_response_time_summary(self, response_time_ms: float) -> None:
+        self._response_time_count += 1
+        if self._min_response_time_ms is None or response_time_ms < self._min_response_time_ms:
+            self._min_response_time_ms = response_time_ms
+        if self._max_response_time_ms is None or response_time_ms > self._max_response_time_ms:
+            self._max_response_time_ms = response_time_ms
+
+        delta = response_time_ms - self._mean_response_time_ms
+        self._mean_response_time_ms += delta / self._response_time_count
+        delta2 = response_time_ms - self._mean_response_time_ms
+        self._m2_response_time += delta * delta2
 
     def add(self, result: RequestResult) -> None:
         """Add a single result. Use add_batch for multiple results."""
@@ -237,6 +358,7 @@ class MetricsCollector:
         # Update streaming metrics incrementally
         self._digest.update(result.response_time_ms)
         self._sum_times += result.response_time_ms
+        self._update_response_time_summary(result.response_time_ms)
         if result.success:
             self._success_count += 1
         else:
@@ -263,6 +385,15 @@ class MetricsCollector:
         # Status code counting
         key = str(result.status_code) if result.status_code is not None else "Error"
         self._status_counts[key] += 1
+        self._method_counts[result.method or "?"] += 1
+        endpoint_key = (result.method or "?", result.url or "")
+        endpoint = self._endpoint_stats.get(endpoint_key)
+        if endpoint is None:
+            endpoint = _EndpointStats()
+            self._endpoint_stats[endpoint_key] = endpoint
+        endpoint.add(result)
+        if _is_timeout_failure(result):
+            self._timeout_count += 1
 
         self._agg_cache = None
 
@@ -278,12 +409,16 @@ class MetricsCollector:
         deque_append = self._results.append
         digest_update = self._digest.update
         status_counts = self._status_counts
+        method_counts = self._method_counts
+        endpoint_stats = self._endpoint_stats
+        update_response_time_summary = self._update_response_time_summary
         max_results = self._max_results
 
         batch_count = 0
         batch_sum = 0.0
         batch_success = 0
         batch_failed = 0
+        batch_timeouts = 0
 
         batch_error_counts = defaultdict(int)
         batch_satisfied = 0
@@ -304,6 +439,7 @@ class MetricsCollector:
             rt = result.response_time_ms
             batch_sum += rt
             digest_update(rt)
+            update_response_time_summary(rt)
 
             if result.success:
                 batch_success += 1
@@ -324,11 +460,21 @@ class MetricsCollector:
 
             key = str(result.status_code) if result.status_code is not None else "Error"
             status_counts[key] += 1
+            method_counts[result.method or "?"] += 1
+            endpoint_key = (result.method or "?", result.url or "")
+            endpoint = endpoint_stats.get(endpoint_key)
+            if endpoint is None:
+                endpoint = _EndpointStats()
+                endpoint_stats[endpoint_key] = endpoint
+            endpoint.add(result)
+            if _is_timeout_failure(result):
+                batch_timeouts += 1
 
         self._total_added += batch_count
         self._sum_times += batch_sum
         self._success_count += batch_success
         self._failed_count += batch_failed
+        self._timeout_count += batch_timeouts
         self._satisfied_count += batch_satisfied
         self._tolerating_count += batch_tolerating
 
@@ -486,21 +632,15 @@ class MetricsCollector:
         return out
 
     def endpoint_aggregates(self) -> dict[str, AggregateMetrics]:
-        """Per-endpoint (method + path key) aggregates. Single pass with tuple keys."""
-        by_key: dict[tuple[str, str], list[RequestResult]] = defaultdict(list)
-        for r in self._results:
-            # Use tuple key for faster hashing
-            by_key[(r.method, r.url)].append(r)
-
+        """Per-endpoint (method + URL key) aggregates over all collected results."""
         start_ms = (self._start_time or 0) * 1000
-        end_ms = (self._end_time or 0) * 1000
-        if self._results:
-            end_ms = max(r.timestamp * 1000 for r in self._results)
+        end_ms = (self._end_time or time.perf_counter()) * 1000
+        duration_ms = max(end_ms - start_ms, 0.0)
 
         result: dict[str, AggregateMetrics] = {}
-        for (method, url), v in by_key.items():
+        for (method, url), stats in self._endpoint_stats.items():
             key = f"{method} {url}"
-            result[key] = compute_aggregate(v, start_ms, end_ms, include_response_times=False)
+            result[key] = stats.to_aggregate(duration_ms)
         return result
 
     def sla_violations(self, config: RunConfig) -> list[str]:

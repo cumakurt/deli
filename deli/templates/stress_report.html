@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stress Test Report — {{ collection_name }}</title>
+  {{ echarts_script | safe }}
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-secondary: #475569;
+      --muted: #64748b;
+      --accent: #2563eb;
+      --accent-light: #eff6ff;
+      --success: #059669;
+      --success-light: #ecfdf5;
+      --danger: #dc2626;
+      --danger-light: #fef2f2;
+      --warning: #d97706;
+      --warning-light: #fffbeb;
+      --radius: 12px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.06);
+      --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 0;
+      line-height: 1.6;
+      font-size: 15px;
+    }
+    .container { max-width: 1280px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .report-header {
+      background: linear-gradient(135deg, #7c2d12 0%, #c2410c 100%);
+      color: #fff;
+      padding: 2rem 2rem 2.5rem;
+      margin: 0 0 2rem;
+      border-radius: 0 0 var(--radius) var(--radius);
+      box-shadow: var(--shadow-md);
+    }
+    .report-header .container { padding-top: 0; padding-bottom: 0; }
+    .report-header h1 { margin: 0 0 0.25rem; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
+    .report-header .subtitle { opacity: 0.9; font-size: 0.95rem; margin: 0; }
+    .report-meta { font-size: 0.875rem; opacity: 0.85; margin-top: 0.75rem; }
+    .report-meta span { margin-right: 1.5rem; }
+    .section { margin-bottom: 2.5rem; }
+    .section-title {
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: var(--text);
+      margin: 0 0 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid var(--accent);
+      display: inline-block;
+    }
+    .section-subtitle { font-size: 0.9rem; color: var(--text-secondary); margin: -0.5rem 0 1rem; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem 1.5rem; box-shadow: var(--shadow); }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      box-shadow: var(--shadow);
+      border-left: 4px solid var(--accent);
+    }
+    .kpi-card.success { border-left-color: var(--success); }
+    .kpi-card.danger { border-left-color: var(--danger); }
+    .kpi-card.warning { border-left-color: var(--warning); }
+    .kpi-card .value { font-size: 1.75rem; font-weight: 700; color: var(--text); line-height: 1.2; }
+    .kpi-card .label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 0.25rem; }
+    .executive-summary { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem 1.75rem; box-shadow: var(--shadow); margin-bottom: 2rem; }
+    .executive-summary p { margin: 0; font-size: 1rem; line-height: 1.7; color: var(--text); }
+    .system-behavior {
+      background: var(--accent-light);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 1.5rem 1.75rem;
+      margin-bottom: 2rem;
+      box-shadow: var(--shadow);
+    }
+    .system-behavior .section-title { border-bottom-color: var(--accent); }
+    .system-behavior ul { margin: 0.5rem 0 0; padding-left: 1.25rem; line-height: 1.8; }
+    .system-behavior li { margin-bottom: 0.5rem; }
+    .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; box-shadow: var(--shadow); margin-bottom: 1.5rem; }
+    .chart-card .chart-title { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem; }
+    .chart-box { height: 300px; width: 100%; }
+    .table-card { overflow: hidden; }
+    .table-card table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .table-card th, .table-card td { padding: 0.65rem 1rem; text-align: left; border-bottom: 1px solid var(--border); }
+    .table-card th { background: var(--bg); color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .table-card tbody tr:hover { background: var(--bg); }
+    .table-card tbody tr.exceeded { background: var(--danger-light); }
+    .footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); }
+    .footer p { margin: 0.35rem 0; }
+    .footer a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header class="report-header">
+    <div class="container">
+      <h1>Stress Test Report</h1>
+      <p class="subtitle">{{ collection_name }} — {{ scenario }} scenario</p>
+      <p class="report-meta">
+        <span>Started: {{ start_datetime }}</span>
+        <span>Ended: {{ end_datetime }}</span>
+      </p>
+    </div>
+  </header>
+
+  <div class="container">
+    <section class="section">
+      <h2 class="section-title">Executive Summary</h2>
+      <p class="section-subtitle">High-level findings for management and stakeholders</p>
+      <div class="executive-summary">
+        <p>
+          This stress test progressively increased load until SLA thresholds were exceeded. The system remained within SLA up to <strong>{{ max_sustainable_load_users }} concurrent users</strong> (maximum sustainable load). Threshold violations were first observed at <strong>{{ breaking_point_users }} users</strong> (breaking point). The first errors occurred at <strong>{{ first_error_at_users }} users</strong>; response time increased non-linearly starting at <strong>{{ nonlinear_latency_at_users }} users</strong>. Recovery time after overload was <strong>{{ recovery_seconds }} seconds</strong>. SLA thresholds used: P95 &le; {{ sla_p95_ms }} ms, P99 &le; {{ sla_p99_ms }} ms, Error rate &le; {{ sla_error_rate_pct }}%.
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Breaking Point &amp; Max Sustainable Load</h2>
+      <p class="section-subtitle">Key stress test outcomes</p>
+      <div class="kpi-grid">
+        <div class="kpi-card success">
+          <div class="value">{{ max_sustainable_load_users }}</div>
+          <div class="label">Max Sustainable Load (users)</div>
+        </div>
+        <div class="kpi-card danger">
+          <div class="value">{{ breaking_point_users }}</div>
+          <div class="label">Breaking Point (users)</div>
+        </div>
+        <div class="kpi-card">
+          <div class="value">{{ first_error_at_users }}</div>
+          <div class="label">First Error At (users)</div>
+        </div>
+        <div class="kpi-card">
+          <div class="value">{{ nonlinear_latency_at_users }}</div>
+          <div class="label">Non-Linear Latency At (users)</div>
+        </div>
+        <div class="kpi-card">
+          <div class="value">{{ recovery_seconds }}s</div>
+          <div class="label">Recovery Time</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section system-behavior">
+      <h2 class="section-title">System Behavior Summary</h2>
+      <p class="section-subtitle">Degradation and recovery analysis for CISO and executives</p>
+      <ul>
+        <li><strong>Maximum sustainable load:</strong> The system remained within SLA up to <strong>{{ max_sustainable_load_users }} concurrent users</strong>. Beyond this point, response times or error rates exceeded acceptable thresholds.</li>
+        <li><strong>Breaking point:</strong> Threshold violations were first observed at <strong>{{ breaking_point_users }} users</strong>, indicating the load level at which the system began to degrade.</li>
+        <li><strong>First failure:</strong> The first errors occurred at <strong>{{ first_error_at_users }} users</strong>, marking the onset of instability under increasing load.</li>
+        <li><strong>Latency behavior:</strong> Response time increased in a non-linear manner starting at <strong>{{ nonlinear_latency_at_users }} users</strong>, signaling resource contention or saturation.</li>
+        <li><strong>Recovery:</strong> After overload, the system recovered within <strong>{{ recovery_seconds }} seconds</strong>.</li>
+        <li><strong>SLA thresholds used:</strong> P95 &le; {{ sla_p95_ms }} ms, P99 &le; {{ sla_p99_ms }} ms, Error rate &le; {{ sla_error_rate_pct }}%.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Performance &amp; Liveness Charts</h2>
+      <p class="section-subtitle">Load vs response time, error rate, and TPS by phase</p>
+      <div class="chart-card">
+        <div class="chart-title">Load vs Response Time (P95 / P99) — ms</div>
+        <div id="chart-latency" class="chart-box"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Error Rate (%) by Load Level</div>
+        <div id="chart-error-rate" class="chart-box"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">TPS by Load Level</div>
+        <div id="chart-tps" class="chart-box"></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Phase Results (Detail)</h2>
+      <p class="section-subtitle">Per-phase metrics and threshold status</p>
+      <div class="card table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Phase</th>
+              <th>Users</th>
+              <th>Duration (s)</th>
+              <th>Total Req</th>
+              <th>TPS</th>
+              <th>P95 (ms)</th>
+              <th>P99 (ms)</th>
+              <th>Error %</th>
+              <th>Timeout %</th>
+              <th>Threshold</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in phase_rows %}
+            <tr class="{% if row.threshold_exceeded %}exceeded{% endif %}">
+              <td>{{ row.phase }}</td>
+              <td>{{ row.users }}</td>
+              <td>{{ row.duration_s }}</td>
+              <td>{{ row.total }}</td>
+              <td>{{ row.tps }}</td>
+              <td>{{ row.p95_ms }}</td>
+              <td>{{ row.p99_ms }}</td>
+              <td>{{ row.error_pct }}</td>
+              <td>{{ row.timeout_pct }}</td>
+              <td>{% if row.threshold_exceeded %}Exceeded: {{ row.exceeded_reason }}{% else %}OK{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p>Generated by <strong>deli</strong> — Lightweight load execution engine. Report is self-contained and works offline.</p>
+      <p>Developer: Cuma Kurt — <a href="mailto:cumakurt@gmail.com">cumakurt@gmail.com</a> | <a href="https://www.linkedin.com/in/cuma-kurt-34414917/">LinkedIn</a> | <a href="https://github.com/cumakurt/deli">GitHub</a></p>
+    </footer>
+  </div>
+
+  <script>
+    (function() {
+      if (typeof echarts === 'undefined') return;
+      var theme = { backgroundColor: 'transparent', textStyle: { color: '#475569' }, grid: { left: '3%', right: '4%', bottom: '3%', top: '12%', containLabel: true } };
+      var axisStyle = { axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { color: '#64748b' }, splitLine: { lineStyle: { color: '#f1f5f9' } } };
+      var phaseLabels = {{ phase_labels | safe }};
+      var phaseP95 = {{ phase_p95 | safe }};
+      var phaseP99 = {{ phase_p99 | safe }};
+      var phaseErrorRate = {{ phase_error_rate | safe }};
+      var phaseTps = {{ phase_tps | safe }};
+
+      var chartLatency = echarts.init(document.getElementById('chart-latency'), null, { renderer: 'canvas' });
+      chartLatency.setOption({ ...theme, tooltip: { trigger: 'axis' }, legend: { data: ['P95 (ms)', 'P99 (ms)'], textStyle: { color: '#475569' }, top: '2%' }, xAxis: { type: 'category', data: phaseLabels, name: 'Concurrent users', ...axisStyle }, yAxis: { type: 'value', name: 'ms', ...axisStyle }, series: [{ name: 'P95 (ms)', type: 'line', smooth: true, data: phaseP95, lineStyle: { color: '#2563eb' }, symbol: 'circle', symbolSize: 6 }, { name: 'P99 (ms)', type: 'line', smooth: true, data: phaseP99, lineStyle: { color: '#d97706' }, symbol: 'circle', symbolSize: 6 }] });
+
+      var chartError = echarts.init(document.getElementById('chart-error-rate'), null, { renderer: 'canvas' });
+      chartError.setOption({ ...theme, tooltip: { trigger: 'axis' }, xAxis: { type: 'category', data: phaseLabels, name: 'Concurrent users', ...axisStyle }, yAxis: { type: 'value', name: '%', ...axisStyle }, series: [{ name: 'Error rate %', type: 'line', smooth: true, data: phaseErrorRate, lineStyle: { color: '#dc2626' }, areaStyle: { color: 'rgba(220, 38, 38, 0.15)' }, symbol: 'circle', symbolSize: 6 }] });
+
+      var chartTps = echarts.init(document.getElementById('chart-tps'), null, { renderer: 'canvas' });
+      chartTps.setOption({ ...theme, tooltip: { trigger: 'axis' }, xAxis: { type: 'category', data: phaseLabels, name: 'Concurrent users', ...axisStyle }, yAxis: { type: 'value', name: 'TPS', ...axisStyle }, series: [{ name: 'TPS', type: 'line', smooth: true, data: phaseTps, lineStyle: { color: '#059669' }, areaStyle: { color: 'rgba(5, 150, 105, 0.15)' }, symbol: 'circle', symbolSize: 6 }] });
+
+      window.addEventListener('resize', function() { chartLatency.resize(); chartError.resize(); chartTps.resize(); });
+    })();
+  </script>
+</body>
+</html>

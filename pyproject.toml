@@ -46,5 +46,8 @@ deli = "deli.cli:main"
 where = ["."]
 include = ["deli*"]
 
+[tool.setuptools.package-data]
+deli = ["templates/*.html", "templates/vendor/*.js"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

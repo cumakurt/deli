@@ -74,7 +74,7 @@ def _get_echarts_script() -> str:
     return "<!-- ECharts not bundled. Add templates/vendor/echarts.min.js for offline charts. -->"
 
 
-# Raw data: full export is written to a separate JSON file (no limit); HTML report stays light
+# Raw data: retained request samples are written separately; HTML report stays light.
 RAW_DATA_JSON_SUFFIX = "_raw.json"
 
 
@@ -206,15 +206,10 @@ def generate_report(
     percentile_names = ["P50", "P95", "P99"]
     percentile_values = [round(agg.p50_ms, 2), round(agg.p95_ms, 2), round(agg.p99_ms, 2)]
 
-    # Min/Max/Std response time (report-time only; times already loaded above for histogram)
-    min_rt_ms = round(min(times), 2) if times else 0.0
-    max_rt_ms = round(max(times), 2) if times else 0.0
-    if times:
-        mean_rt = sum(times) / len(times)
-        variance = sum((t - mean_rt) ** 2 for t in times) / len(times)
-        std_rt_ms = round((variance**0.5), 2)
-    else:
-        std_rt_ms = 0.0
+    min_rt, max_rt, std_rt = collector.response_time_summary()
+    min_rt_ms = round(min_rt, 2)
+    max_rt_ms = round(max_rt, 2)
+    std_rt_ms = round(std_rt, 2)
 
     # SLA summary for report (report-time only)
     sla_summary: list[dict[str, Any]] = []
@@ -348,11 +343,7 @@ def generate_report(
         )
 
     # Method distribution (GET, POST, etc.) and status distribution (200, 404, ...)
-    from collections import defaultdict
-
-    method_counts: dict[str, int] = defaultdict(int)
-    for r in collector.results:
-        method_counts[r.method or "?"] += 1
+    method_counts = collector.method_counts()
     method_distribution = [
         {"method": m, "count": c} for m, c in sorted(method_counts.items(), key=lambda x: -x[1])
     ]
@@ -364,7 +355,7 @@ def generate_report(
     # Test result assessments and comments
     test_assessments = _build_test_assessments(agg, config, violations)
 
-    # Write full raw request data to a separate JSON file (no limit)
+    # Write retained raw request samples to a separate JSON file.
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     raw_json_path = out_path.parent / (out_path.stem + RAW_DATA_JSON_SUFFIX)
@@ -475,6 +466,12 @@ def generate_junit_report(
 
     agg = collector.full_aggregate()
     violations = collector.sla_violations(config)
+    failure_messages = list(violations)
+    if agg.failed_requests > 0:
+        failure_messages.append(
+            f"{agg.failed_requests}/{agg.total_requests} request(s) failed "
+            f"({agg.error_rate_pct:.2f}% error rate)"
+        )
     scenario_display = scenario_label if scenario_label else getattr(config, "scenario", None)
     scenario_str = (
         scenario_display.value if hasattr(scenario_display, "value") else str(scenario_display)
@@ -484,7 +481,7 @@ def generate_junit_report(
         "testsuite",
         name=f"deli.{collection_name}",
         tests="1",
-        failures=str(1 if violations else 0),
+        failures=str(1 if failure_messages else 0),
         errors="0",
         skipped="0",
         time=f"{(agg.total_duration_ms or 0) / 1000:.3f}",
@@ -498,9 +495,9 @@ def generate_junit_report(
         classname=f"deli.{collection_name}",
         time=f"{(agg.total_duration_ms or 0) / 1000:.3f}",
     )
-    if violations:
-        failure = ET.SubElement(testcase, "failure", message="SLA violation(s)")
-        failure.text = "\n".join(violations)
+    if failure_messages:
+        failure = ET.SubElement(testcase, "failure", message="Load test failure(s)")
+        failure.text = "\n".join(failure_messages)
     system_out = ET.SubElement(testcase, "system-out")
     system_out.text = (
         f"total_requests={agg.total_requests} tps={agg.tps:.2f} "
@@ -553,7 +550,7 @@ def generate_json_report(
         "error_rate_pct": round(agg.error_rate_pct, 4),
         "success_rate_pct": round(agg.success_rate_pct, 4),
         "sla_violations": violations,
-        "passed": len(violations) == 0,
+        "passed": len(violations) == 0 and agg.failed_requests == 0,
     }
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)

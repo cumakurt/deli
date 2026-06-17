@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Performance Test Report — {{ collection_name }}</title>
+  {{ echarts_script | safe }}
+  <style>
+    :root {
+      /* Dark Mode Colors (Fixed) */
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --border: #334155;
+      --text: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --muted: #64748b;
+      --accent: #60a5fa;
+      --accent-light: rgba(59, 130, 246, 0.1);
+      --success: #34d399;
+      --success-light: rgba(16, 185, 129, 0.1);
+      --danger: #f87171;
+      --danger-light: rgba(239, 68, 68, 0.1);
+      --warning: #fbbf24;
+      --warning-light: rgba(245, 158, 11, 0.1);
+      --radius: 12px;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+      --font-main: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      --font-size-base: 15px;
+      --font-size-chart: 13px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--font-main);
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 0;
+      line-height: 1.6;
+      font-size: var(--font-size-base);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Animations */
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .anim-fade-up {
+      animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      opacity: 0;
+    }
+
+    /* Full width container */
+    .container {
+      max-width: 95%;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    .report-header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+      color: #fff;
+      padding: 3rem 2rem;
+      border-radius: 0 0 24px 24px;
+      box-shadow: var(--shadow-lg);
+      margin-bottom: 2.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .report-header::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.2), transparent 40%);
+      pointer-events: none;
+    }
+
+    .header-content {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .header-title h1 {
+      margin: 0 0 0.5rem;
+      font-size: 2.25rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .header-title .subtitle {
+      opacity: 0.9;
+      font-size: 1.1rem;
+      margin: 0;
+      font-weight: 500;
+    }
+
+    .header-meta {
+      font-size: 0.9rem;
+      opacity: 0.8;
+      margin-top: 1rem;
+      display: flex;
+      gap: 1.5rem;
+    }
+
+    .section {
+      margin-bottom: 3rem;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 1.5rem;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 0.75rem;
+    }
+
+    .section-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text);
+      margin: 0;
+      letter-spacing: -0.02em;
+    }
+
+    .section-subtitle {
+      font-size: 1rem;
+      color: var(--text-secondary);
+      margin: 0;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      box-shadow: var(--shadow);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-lg);
+    }
+
+    /* KPI Grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .kpi-card::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+      background: var(--accent);
+    }
+
+    .kpi-card.success::after {
+      background: var(--success);
+    }
+
+    .kpi-card.warning::after {
+      background: var(--warning);
+    }
+
+    .kpi-card.danger::after {
+      background: var(--danger);
+    }
+
+    .kpi-card .value {
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1.1;
+      margin-bottom: 0.25rem;
+    }
+
+    .kpi-card .label {
+      font-size: 0.85rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    /* Apdex Badge */
+    .apdex-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      font-weight: 700;
+      font-size: 1.1rem;
+      margin-left: auto;
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+    }
+
+    .apdex-good {
+      background: var(--success-light);
+      color: var(--success);
+    }
+
+    .apdex-fair {
+      background: var(--warning-light);
+      color: var(--warning);
+    }
+
+    .apdex-poor {
+      background: var(--danger-light);
+      color: var(--danger);
+    }
+
+    /* Verdict Box */
+    .verdict-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
+      border-left: 6px solid;
+    }
+
+    .verdict-box .icon {
+      font-size: 2.5rem;
+    }
+
+    .verdict-box.success {
+      border-left-color: var(--success);
+      background: linear-gradient(to right, var(--success-light), var(--surface));
+    }
+
+    .verdict-box.warning {
+      border-left-color: var(--warning);
+      background: linear-gradient(to right, var(--warning-light), var(--surface));
+    }
+
+    .verdict-box.danger {
+      border-left-color: var(--danger);
+      background: linear-gradient(to right, var(--danger-light), var(--surface));
+    }
+
+    /* Charts */
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .chart-grid.full {
+      grid-template-columns: 1fr;
+    }
+
+    @media (max-width: 1024px) {
+      .chart-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .chart-box {
+      height: 400px;
+      width: 100%;
+    }
+
+    .chart-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 1rem;
+    }
+
+    /* Data Table */
+    .table-container {
+      overflow-x: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      margin-bottom: 1rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+    }
+
+    th,
+    td {
+      padding: 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+
+    th {
+      background: var(--bg);
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tbody tr:hover {
+      background-color: rgba(255, 255, 255, 0.03);
+    }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+
+    .btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-light);
+    }
+
+    .btn i {
+      font-style: normal;
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      color: var(--muted);
+      margin-top: 4rem;
+      padding-top: 2rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+
+    .footer a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .footer-developer {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .footer-developer a { color: var(--text-secondary); }
+    .footer-developer a:hover { color: var(--accent); }
+    .footer-icon-links { display: inline-flex; align-items: center; gap: 0.75rem; margin-top: 0.5rem; }
+    .footer-icon-links a { display: inline-flex; align-items: center; color: var(--text-secondary); }
+    .footer-icon-links a:hover { color: var(--accent); }
+    .footer-icon-links svg { width: 22px; height: 22px; }
+
+    /* Chart axis labels and notes */
+    .chart-notes {
+      margin-top: 0.75rem;
+      padding: 0.75rem 1rem;
+      background: var(--surface);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+    .chart-notes strong { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; }
+    .chart-notes p { margin: 0.35rem 0 0; }
+    .chart-notes p:first-of-type { margin-top: 0; }
+
+    /* Table of contents */
+    .toc {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .toc-title { margin: 0 0 0.75rem; font-size: 0.9rem; color: var(--muted); text-transform: uppercase; }
+    .toc-list { margin: 0; padding-left: 1.25rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.35rem; }
+    .toc-list a { color: var(--accent); text-decoration: none; font-size: 0.95rem; }
+    .toc-list a:hover { text-decoration: underline; }
+
+    /* Developer info */
+    .developer-info {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      padding: 0.6rem 1rem;
+      margin-bottom: 1.5rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .developer-info span { margin-right: 0.5rem; }
+    .developer-info strong { color: var(--text-secondary); font-weight: 600; }
+
+    /* Print */
+    @media print {
+      body { background: #fff; color: #111; }
+      .report-header { background: #1e3a5f; color: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .toc { break-after: avoid; }
+      .section { break-inside: avoid; }
+      .chart-box { height: 280px; }
+      .btn, .footer a { color: #0066cc; }
+    }
+  </style>
+</head>
+
+<body class="dark-mode">
+
+  <header class="report-header anim-fade-up">
+    <div class="container">
+      <div class="header-content">
+        <div class="header-title">
+          <h1>{{ collection_name }}</h1>
+          <p class="subtitle">{{ scenario }} Scenario Report</p>
+          <div class="header-meta">
+            <span>Started: {{ start_datetime_str }}</span>
+            <span>Duration: {{ duration_seconds }}s</span>
+            <span>Users: {{ users }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+
+    <div class="developer-info anim-fade-up" id="developer-info">
+      <span><strong>deli</strong> {{ developer_info.deli_version }}</span>
+      <span>Report generated: {{ developer_info.report_generated_at }}</span>
+      <span>Python {{ developer_info.python_version }}</span>
+    </div>
+
+    <nav class="toc anim-fade-up" id="toc">
+      <div class="toc-title">Contents</div>
+      <ul class="toc-list">
+        <li><a href="#developer-info">Developer Info</a></li>
+        <li><a href="#verdict">Test Verdict</a></li>
+        <li><a href="#kpis">Key Performance Indicators</a></li>
+        <li><a href="#errors-outcome">Errors &amp; Outcome</a></li>
+        <li><a href="#performance-trends">Performance Trends</a></li>
+        <li><a href="#response-dist">Response Time Distribution</a></li>
+        <li><a href="#percentiles">Percentile Comparison</a></li>
+        <li><a href="#status-codes">HTTP Status Codes</a></li>
+        <li><a href="#endpoints">Endpoint Performance</a></li>
+        <li><a href="#test-config">Test Configuration</a></li>
+        <li><a href="#sla-summary">SLA Summary</a></li>
+        <li><a href="#raw-data">Raw Request Data</a></li>
+      </ul>
+    </nav>
+
+    <!-- Executive Summary -->
+    <section class="section anim-fade-up" id="verdict" style="animation-delay: 0.1s;">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Test Verdict</h2>
+          <p class="section-subtitle">Overall assessment based on SLA and stability</p>
+        </div>
+      </div>
+      <div class="verdict-box {{ test_verdict_class }}">
+        <div class="icon">
+          {% if test_verdict_class == 'success' %}✓
+          {% elif test_verdict_class == 'warning' %}!
+          {% else %}✕{% endif %}
+        </div>
+        <div>
+          <h3 style="margin:0; font-size:1.25rem;">{{ test_verdict }}</h3>
+          <p style="margin:0.25rem 0 0; opacity:0.9;">{{ test_summary }}</p>
+        </div>
+      </div>
+      <div class="card" style="margin-top: 1.5rem; border-left: 4px solid var(--accent);">
+        <h4 style="margin:0 0 0.5rem; color:var(--muted); font-size:0.8rem; text-transform:uppercase;">Executive Summary</h4>
+        <p style="margin:0; font-size:1.05rem;">{{ executive_summary }}</p>
+      </div>
+      {% if test_assessments %}
+      <div class="card" style="margin-top: 1rem; border-left: 4px solid var(--success);">
+        <h4 style="margin:0 0 0.5rem; color:var(--muted); font-size:0.8rem; text-transform:uppercase;">Assessment &amp; Comments</h4>
+        <ul style="margin:0; padding-left:1.25rem; font-size:1rem;">
+          {% for item in test_assessments %}
+          <li style="margin-bottom:0.35rem;">{{ item }}</li>
+          {% endfor %}
+          {% if trend_comment %}
+          <li style="margin-bottom:0.35rem;">{{ trend_comment }}</li>
+          {% endif %}
+        </ul>
+      </div>
+      {% endif %}
+    </section>
+
+    <!-- Key Metrics -->
+    <section class="section anim-fade-up" id="kpis" style="animation-delay: 0.2s;">
+      <h2 class="section-title" style="margin-bottom:1.5rem;">Key Performance Indicators (KPIs)</h2>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="value">{{ total_requests | int }}</div>
+          <div class="label">Total Requests</div>
+        </div>
+        <div class="kpi-card">
+          <div class="value">{{ tps }}</div>
+          <div class="label">Avg TPS</div>
+        </div>
+        <div class="kpi-card">
+          <div class="value">{{ p95_ms }} <span style="font-size:1rem;">ms</span></div>
+          <div class="label">P95 Latency</div>
+        </div>
+        <div class="kpi-card">
+          <div class="value">{{ error_rate_pct }}<span style="font-size:1rem;">%</span></div>
+          <div class="label">Error Rate</div>
+        </div>
+        <!-- Apdex Card -->
+        <div class="kpi-card">
+          <div class="value">{{ apdex_score }}</div>
+          <div class="label">Apdex Score (T=0.5s)</div>
+          <div
+            class="apdex-badge {% if apdex_score >= 0.9 %}apdex-good{% elif apdex_score >= 0.7 %}apdex-fair{% else %}apdex-poor{% endif %}">
+            {{ (apdex_score * 10) | round | int }}/10
+          </div>
+        </div>
+        <div class="kpi-card">
+          <div class="value">{{ min_rt_ms }} <span style="font-size:1rem;">ms</span></div>
+          <div class="label">Min Response Time</div>
+        </div>
+        <div class="kpi-card">
+          <div class="value">{{ max_rt_ms }} <span style="font-size:1rem;">ms</span></div>
+          <div class="label">Max Response Time</div>
+        </div>
+        <div class="kpi-card">
+          <div class="value">{{ std_rt_ms }} <span style="font-size:1rem;">ms</span></div>
+          <div class="label">Std Dev (Response Time)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Error Distribution & Success vs Failure (same row) -->
+    <section class="section anim-fade-up" id="errors-outcome" style="animation-delay: 0.3s;">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Errors &amp; Outcome</h2>
+          <p class="section-subtitle">Error distribution and request outcome</p>
+        </div>
+      </div>
+      <div class="chart-grid">
+        <div class="card">
+          <div class="chart-title">Error Distribution (Top 5)</div>
+          <div id="chart-top-errors" class="chart-box"></div>
+          <div class="chart-notes">
+            <p><strong>Axes:</strong> X axis = Count (horizontal); Y axis = Error / Status (vertical).</p>
+            <p><strong>What to look for:</strong> Focus on the most frequent errors (longest bars). Investigate timeouts, connection errors, and 5xx first.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="chart-title">Success vs Failure</div>
+          <div id="chart-success-fail" class="chart-box"></div>
+          <div class="chart-notes">
+            <p><strong>Axes:</strong> X axis = Outcome (Success / Failed); Y axis = Count.</p>
+            <p><strong>What to look for:</strong> Failed count should be near zero. A high Failed bar indicates stability or target issues.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Performance Charts -->
+    <section class="section anim-fade-up" id="performance-trends" style="animation-delay: 0.4s;">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Performance Trends</h2>
+          <p class="section-subtitle">Metrics over time ({{ duration_seconds }}s duration)</p>
+        </div>
+      </div>
+      <div class="chart-grid full">
+        <div class="card">
+          <div class="chart-title">Transactions Per Second (TPS) & User Load</div>
+          <div id="chart-tps" class="chart-box"></div>
+          <div class="chart-notes">
+            <p><strong>Axes:</strong> X axis = Time (seconds); Y axis = TPS (requests/sec).</p>
+            <p><strong>What to look for:</strong> Stable or gradually increasing TPS is good. Sudden drops may indicate throttling or failures.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="chart-title">Response Time Latency (Avg, P95)</div>
+          <div id="chart-latency" class="chart-box"></div>
+          <div class="chart-notes">
+            <p><strong>Axes:</strong> X axis = Time (seconds); Y axis = Response time (ms). Green = average, orange = P95.</p>
+            <p><strong>What to look for:</strong> P95 should stay within SLA. Spikes or rising trend over time suggest degradation.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="chart-title">Error Rate (%)</div>
+          <div id="chart-error-rate" class="chart-box"></div>
+          <div class="chart-notes">
+            <p><strong>Axes:</strong> X axis = Time (seconds); Y axis = Error rate (%).</p>
+            <p><strong>What to look for:</strong> Keep error rate near 0%. Any sustained rise needs investigation.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Response Time Distribution (histogram) -->
+    <section class="section anim-fade-up" id="response-dist" style="animation-delay: 0.42s;">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Response Time Distribution</h2>
+          <p class="section-subtitle">Histogram of response times (ms)</p>
+        </div>
+      </div>
+      <div class="card">
+        <div id="chart-response-dist" class="chart-box"></div>
+        <div class="chart-notes">
+          <p><strong>Axes:</strong> X axis = Latency (ms); Y axis = Count.</p>
+          <p><strong>What to look for:</strong> Most requests should cluster in lower ms. Long tail to the right indicates slow or outlier responses.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Percentile Comparison & HTTP Status Codes (same row) -->
+    <section class="section anim-fade-up" id="percentiles" style="animation-delay: 0.44s;">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Percentile &amp; Status Distribution</h2>
+          <p class="section-subtitle">P50/P95/P99 latency and HTTP status codes</p>
+        </div>
+      </div>
+      <div class="chart-grid">
+        <div class="card">
+          <div class="chart-title">Percentile Comparison (ms)</div>
+          <div id="chart-percentiles" class="chart-box"></div>
+          <div class="chart-notes">
+            <p><strong>Axes:</strong> X axis = Percentile; Y axis = Latency (ms).</p>
+            <p><strong>What to look for:</strong> P95 and P99 should meet SLA. Large gap between P50 and P99 suggests inconsistent latency.</p>
+          </div>
+        </div>
+        <div class="card" id="status-codes">
+          <div class="chart-title">HTTP Status Codes</div>
+          <div id="chart-status-pie" class="chart-box"></div>
+          <div class="chart-notes">
+            <p><strong>Chart:</strong> Pie segments = share of requests per status code (200, 404, 500, etc.).</p>
+            <p><strong>What to look for:</strong> Most should be 2xx. 4xx/5xx segments indicate client or server errors to fix.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Endpoint Performance Table -->
+    <section class="section anim-fade-up" id="endpoints" style="animation-delay: 0.46s;">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Endpoint Performance</h2>
+          <p class="section-subtitle">Per-endpoint metrics (method + URL)</p>
+        </div>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Endpoint</th>
+              <th>Total</th>
+              <th>Success</th>
+              <th>Failed</th>
+              <th>TPS</th>
+              <th>Avg (ms)</th>
+              <th>P95 (ms)</th>
+              <th>P99 (ms)</th>
+              <th>Error %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in endpoint_rows %}
+            <tr>
+              <td title="{{ row.endpoint }}" style="max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ row.endpoint }}</td>
+              <td>{{ row.total }}</td>
+              <td>{{ row.success }}</td>
+              <td>{{ row.failed }}</td>
+              <td>{{ row.tps }}</td>
+              <td>{{ row.avg_ms }}</td>
+              <td>{{ row.p95_ms }}</td>
+              <td>{{ row.p99_ms }}</td>
+              <td>{{ row.error_pct }}%</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Test Configuration & SLA Summary (same row) -->
+    <section class="section anim-fade-up" id="test-config" style="animation-delay: 0.48s;">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Test Configuration</h2>
+          <p class="section-subtitle">Run parameters</p>
+        </div>
+      </div>
+      <div class="chart-grid">
+        <div class="card">
+          <table style="margin:0;">
+            <tbody>
+              <tr><td style="padding:0.5rem; color:var(--muted);">Users</td><td style="padding:0.5rem;">{{ test_config_summary.users }}</td></tr>
+              <tr><td style="padding:0.5rem; color:var(--muted);">Duration (s)</td><td style="padding:0.5rem;">{{ test_config_summary.duration_seconds }}</td></tr>
+              <tr><td style="padding:0.5rem; color:var(--muted);">Ramp-up (s)</td><td style="padding:0.5rem;">{{ test_config_summary.ramp_up_seconds }}</td></tr>
+              <tr><td style="padding:0.5rem; color:var(--muted);">Scenario</td><td style="padding:0.5rem;">{{ test_config_summary.scenario }}</td></tr>
+              <tr><td style="padding:0.5rem; color:var(--muted);">Think time (ms)</td><td style="padding:0.5rem;">{{ test_config_summary.think_time_ms }}</td></tr>
+              <tr><td style="padding:0.5rem; color:var(--muted);">SLA P95 (ms)</td><td style="padding:0.5rem;">{{ test_config_summary.sla_p95_ms or '—' }}</td></tr>
+              <tr><td style="padding:0.5rem; color:var(--muted);">SLA P99 (ms)</td><td style="padding:0.5rem;">{{ test_config_summary.sla_p99_ms or '—' }}</td></tr>
+              <tr><td style="padding:0.5rem; color:var(--muted);">SLA Error %</td><td style="padding:0.5rem;">{{ test_config_summary.sla_error_rate_pct or '—' }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card" id="sla-summary">
+          <h3 class="chart-title">SLA Summary</h3>
+          {% if sla_summary %}
+          <table style="margin:0;">
+            <thead>
+              <tr><th style="padding:0.5rem; text-align:left;">Metric</th><th style="padding:0.5rem;">Target</th><th style="padding:0.5rem;">Actual</th><th style="padding:0.5rem;">Status</th></tr>
+            </thead>
+            <tbody>
+              {% for s in sla_summary %}
+              <tr>
+                <td style="padding:0.5rem;">{{ s.name }}</td>
+                <td style="padding:0.5rem;">{% if s.target_ms is defined %}{{ s.target_ms }} ms{% else %}{{ s.target_pct }}%{% endif %}</td>
+                <td style="padding:0.5rem;">{% if s.actual_ms is defined %}{{ s.actual_ms }} ms{% else %}{{ s.actual_pct }}%{% endif %}</td>
+                <td style="padding:0.5rem;">{% if s.met %}<span style="color:var(--success);">Met</span>{% else %}<span style="color:var(--danger);">Not met</span>{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <p style="margin:0; color:var(--muted); font-size:0.9rem;">No SLA thresholds defined for this run.</p>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    <!-- Raw Request Data: download only + Method & Status distributions -->
+    <section class="section anim-fade-up" id="raw-data" style="animation-delay: 0.5s;">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Raw Request Data</h2>
+          <p class="section-subtitle">Retained request samples and full-run statistics</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <p style="margin:0 0 0.75rem; color:var(--text-secondary); font-size:0.95rem;">Download {{ raw_total }} retained request sample(s) out of {{ total_requests }} total request(s). Aggregate KPIs and distributions above include the full run.</p>
+        <a href="{{ raw_data_json_filename }}" download class="btn" style="display:inline-block; text-decoration:none;">Download JSON samples</a>
+      </div>
+
+      <h3 class="section-title" style="margin-bottom:1rem; font-size:1.15rem;">Request statistics</h3>
+      <div class="chart-grid">
+        <div class="card">
+          <div class="chart-title">Method distribution</div>
+          <div id="chart-method-dist" class="chart-box"></div>
+          <div class="chart-notes">
+            <p><strong>Axes:</strong> X axis = HTTP Method; Y axis = Count.</p>
+            <p><strong>What to look for:</strong> Matches your test mix. Imbalance may indicate wrong scenario or collection.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="chart-title">Status code distribution</div>
+          <div id="chart-status-dist" class="chart-box"></div>
+          <div class="chart-notes">
+            <p><strong>Axes:</strong> X axis = Status code; Y axis = Count.</p>
+            <p><strong>What to look for:</strong> Dominant 2xx is healthy. High 4xx/5xx or "Error" means target or configuration issues.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p>Generated by <strong>deli</strong> — High-Performance Load Testing Engine</p>
+      <div class="footer-developer">
+        <p style="margin:0;">{{ footer_developer.author_name }} · <a href="mailto:{{ footer_developer.author_email }}">{{ footer_developer.author_email }}</a></p>
+        <div class="footer-icon-links">
+          <a href="{{ footer_developer.linkedin_url }}" target="_blank" rel="noopener noreferrer" title="LinkedIn" aria-label="LinkedIn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+          </a>
+          <a href="{{ footer_developer.github_repo_url }}" target="_blank" rel="noopener noreferrer" title="GitHub (deli)" aria-label="GitHub">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          </a>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <script>
+    // --- Data Injection ---
+    const tpsData = { labels: {{ tps_labels | safe }}, values: {{ tps_values | safe }} };
+    const latData = { avg: {{ avg_rt_values | safe }}, p95: {{ p95_rt_values | safe }} };
+    const errData = {{ error_rate_values | safe }};
+    const topErrors = { labels: {{ top_error_labels | safe }}, values: {{ top_error_values | safe }} };
+    const donutData = {{ success_fail_donut | safe }};
+    const methodDistribution = {{ method_distribution_json | safe }};
+    const statusDistribution = {{ status_distribution_json | safe }};
+    const distLabels = {{ dist_labels | safe }};
+    const distValues = {{ dist_values | safe }};
+    const percentileNames = {{ percentile_names | safe }};
+    const percentileValues = {{ percentile_values | safe }};
+    const statusPieData = {{ status_pie_data | safe }};
+
+    // --- Chart Config ---
+    const textColor = '#94a3b8';
+    const gridColor = '#334155';
+    const bg = 'transparent';
+    const chartFontSize = 13;
+
+    function initChart(id, options) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const chart = echarts.init(el);
+      const baseOptions = {
+        backgroundColor: bg,
+        textStyle: { fontFamily: 'Inter, Segoe UI, system-ui, sans-serif', fontSize: chartFontSize },
+        tooltip: { trigger: 'axis', backgroundColor: '#1e293b', borderColor: gridColor, textStyle: { color: '#fff', fontSize: chartFontSize } },
+        grid: { left: '3%', right: '3%', bottom: '12%', top: '12%', containLabel: true },
+        xAxis: { name: 'X', nameLocation: 'middle', nameGap: 28, nameTextStyle: { color: textColor, fontSize: chartFontSize }, axisLine: { lineStyle: { color: gridColor } }, axisLabel: { color: textColor, fontSize: chartFontSize }, type: 'category' },
+        yAxis: { name: 'Y', nameLocation: 'middle', nameGap: 45, nameTextStyle: { color: textColor, fontSize: chartFontSize }, splitLine: { lineStyle: { color: gridColor } }, axisLabel: { color: textColor, fontSize: chartFontSize }, type: 'value' }
+      };
+      const finalOpts = { ...baseOptions, ...options };
+      if (options.xAxis) finalOpts.xAxis = { ...baseOptions.xAxis, ...options.xAxis };
+      if (options.yAxis) finalOpts.yAxis = { ...baseOptions.yAxis, ...options.yAxis };
+      if (options.series) finalOpts.series = options.series;
+      if (options.tooltip) finalOpts.tooltip = { ...baseOptions.tooltip, ...options.tooltip };
+      chart.setOption(finalOpts);
+      window.addEventListener('resize', () => chart.resize());
+    }
+
+    // --- Render Charts ---
+    if (typeof echarts !== 'undefined') {
+      // TPS — X: time, Y: requests/sec
+      initChart('chart-tps', {
+        xAxis: { name: 'Time (seconds)', data: tpsData.labels },
+        yAxis: { name: 'TPS (requests/sec)' },
+        series: [{
+          name: 'TPS', type: 'line', smooth: true, showSymbol: false,
+          data: tpsData.values, itemStyle: { color: '#3b82f6' },
+          areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(59,130,246,0.3)' }, { offset: 1, color: 'rgba(59,130,246,0.01)' }]) }
+        }]
+      });
+
+      // Latency — X: time, Y: ms
+      initChart('chart-latency', {
+        xAxis: { name: 'Time (seconds)', data: tpsData.labels },
+        yAxis: { name: 'Response time (ms)' },
+        legend: { textStyle: { color: textColor }, top: 0 },
+        series: [
+          { name: 'Avg ms', type: 'line', smooth: true, showSymbol: false, data: latData.avg, itemStyle: { color: '#10b981' } },
+          { name: 'P95 ms', type: 'line', smooth: true, showSymbol: false, data: latData.p95, itemStyle: { color: '#f59e0b' } }
+        ]
+      });
+
+      // Error Rate — X: time, Y: %
+      initChart('chart-error-rate', {
+        xAxis: { name: 'Time (seconds)', data: tpsData.labels },
+        yAxis: { name: 'Error rate (%)' },
+        series: [{
+          name: 'Error %', type: 'line', smooth: true, showSymbol: false,
+          data: errData, itemStyle: { color: '#ef4444' },
+          areaStyle: { color: 'rgba(239, 68, 68, 0.2)' }
+        }]
+      });
+
+      // Response Time Distribution — X: latency buckets (ms), Y: count
+      if (distLabels && distLabels.length > 0) {
+        initChart('chart-response-dist', {
+          xAxis: { name: 'Latency (ms)', type: 'category', data: distLabels, axisLabel: { color: textColor, fontSize: chartFontSize } },
+          yAxis: { name: 'Count', type: 'value', axisLabel: { color: textColor, fontSize: chartFontSize }, splitLine: { lineStyle: { color: gridColor } } },
+          series: [{ type: 'bar', data: distValues, itemStyle: { color: '#60a5fa', borderRadius: [4, 4, 0, 0] }, barWidth: '70%', label: { show: false } }]
+        });
+      }
+
+      // Percentile Comparison — X: percentile, Y: latency (ms)
+      if (percentileNames && percentileNames.length > 0) {
+        initChart('chart-percentiles', {
+          xAxis: { name: 'Percentile', type: 'category', data: percentileNames, axisLabel: { color: textColor, fontSize: chartFontSize } },
+          yAxis: { name: 'Latency (ms)', type: 'value', axisLabel: { color: textColor, fontSize: chartFontSize }, splitLine: { lineStyle: { color: gridColor } } },
+          series: [{ type: 'bar', data: percentileValues, itemStyle: { color: '#a78bfa', borderRadius: [4, 4, 0, 0] }, barWidth: '50%', label: { show: true, position: 'top', color: textColor, fontSize: chartFontSize } }]
+        });
+      }
+
+      // HTTP Status Pie
+      if (statusPieData && statusPieData.length > 0) {
+        const el = document.getElementById('chart-status-pie');
+        if (el) {
+          const chart = echarts.init(el);
+          chart.setOption({
+            backgroundColor: bg,
+            textStyle: { fontFamily: 'Inter, Segoe UI, system-ui, sans-serif', fontSize: chartFontSize },
+            tooltip: { trigger: 'item', backgroundColor: '#1e293b', borderColor: gridColor },
+            series: [{ type: 'pie', radius: ['40%', '70%'], data: statusPieData, label: { color: textColor }, itemStyle: { borderRadius: 5, borderColor: '#1e293b', borderWidth: 2 } }]
+          });
+          window.addEventListener('resize', () => chart.resize());
+        }
+      }
+
+      // Top Errors — X: count, Y: error/status label
+      if (topErrors.values && topErrors.values.length > 0) {
+        initChart('chart-top-errors', {
+          tooltip: { trigger: 'item' },
+          xAxis: { name: 'Count', type: 'value' },
+          yAxis: { name: 'Error / Status', type: 'category', data: topErrors.labels, axisLabel: { interval: 0, width: 120, overflow: 'truncate' } },
+          series: [{ type: 'bar', data: topErrors.values, itemStyle: { color: '#ef4444', borderRadius: [0, 4, 4, 0] } }]
+        });
+      }
+
+      // Success vs Failure — X: outcome, Y: count
+      const successFailLabels = donutData.map(d => d.name);
+      const successFailValues = donutData.map(d => d.value);
+      initChart('chart-success-fail', {
+        tooltip: { trigger: 'axis' },
+        xAxis: { name: 'Outcome', type: 'category', data: successFailLabels, axisLabel: { color: textColor, fontSize: chartFontSize } },
+        yAxis: { name: 'Count', type: 'value', axisLabel: { color: textColor, fontSize: chartFontSize }, splitLine: { lineStyle: { color: gridColor } } },
+        series: [{
+          type: 'bar',
+          data: successFailValues.map((v, i) => ({ value: v, itemStyle: { color: i === 0 ? '#10b981' : '#ef4444', borderRadius: [4, 4, 0, 0] } })),
+          barWidth: '50%',
+          label: { show: true, position: 'top', color: textColor, fontSize: chartFontSize }
+        }]
+      });
+
+      // Method distribution — X: HTTP method, Y: count
+      if (methodDistribution && methodDistribution.length > 0) {
+        const methodLabels = methodDistribution.map(d => d.method);
+        const methodValues = methodDistribution.map(d => d.count);
+        initChart('chart-method-dist', {
+          tooltip: { trigger: 'axis' },
+          xAxis: { name: 'HTTP Method', type: 'category', data: methodLabels, axisLabel: { color: textColor, fontSize: chartFontSize } },
+          yAxis: { name: 'Count', type: 'value', axisLabel: { color: textColor, fontSize: chartFontSize }, splitLine: { lineStyle: { color: gridColor } } },
+          series: [{ type: 'bar', data: methodValues, itemStyle: { color: '#60a5fa', borderRadius: [4, 4, 0, 0] }, barWidth: '50%', label: { show: true, position: 'top', color: textColor, fontSize: chartFontSize } }]
+        });
+      }
+      // Status code distribution — X: status code, Y: count
+      if (statusDistribution && statusDistribution.length > 0) {
+        const statusLabels = statusDistribution.map(d => String(d.status));
+        const statusValues = statusDistribution.map(d => d.count);
+        initChart('chart-status-dist', {
+          tooltip: { trigger: 'axis' },
+          xAxis: { name: 'Status code', type: 'category', data: statusLabels, axisLabel: { color: textColor, fontSize: chartFontSize } },
+          yAxis: { name: 'Count', type: 'value', axisLabel: { color: textColor, fontSize: chartFontSize }, splitLine: { lineStyle: { color: gridColor } } },
+          series: [{ type: 'bar', data: statusValues, itemStyle: { color: '#a78bfa', borderRadius: [4, 4, 0, 0] }, barWidth: '50%', label: { show: true, position: 'top', color: textColor, fontSize: chartFontSize } }]
+        });
+      }
+    }
+
+  </script>
+</body>
+
+</html>
