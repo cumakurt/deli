@@ -52,6 +52,71 @@ pip install -e .
 
 ---
 
+## Hızlı başlangıç
+
+Kurulumu doğrulamanın en hızlı yolu, test etme yetkiniz olan bir URL'ye kısa bir manuel yük testi çalıştırmaktır:
+
+```bash
+deli -m https://httpbin.org/get -o report.html --users 5 --duration 10 --no-live
+```
+
+5 sanal kullanıcı 10 saniye boyunca GET isteği gönderir ve `report.html` oluşturur. Raporu tarayıcıda açarak TPS, gecikme yüzdelikleri ve endpoint istatistiklerini inceleyin.
+
+### Postman collection ile yük testi
+
+API akışınız Postman'de tanımlıysa collection'ı YAML config ile birlikte verin:
+
+```bash
+deli -c path/to/collection.json -f config.yaml -o report.html
+```
+
+`{{base_url}}` gibi değişkenleri dosyayı düzenlemeden geçersiz kılmak için `-e` kullanın. Çok sayıda değişken için Postman Environment dosyası yükleyin (`-E`); `-e` dosyadaki değerleri geçersiz kılar.
+
+### Postman olmadan tek URL (`-m`)
+
+Yalnızca bir endpoint'i test etmek için:
+
+```bash
+deli -m https://api.example.com/health -f config.yaml -o report.html
+```
+
+`-f` olmadan da çalıştırabilirsiniz (varsayılan: 10 kullanıcı, 60 sn, `constant`):
+
+```bash
+deli -m https://httpbin.org/get -o report.html --users 100 --duration 30 --scenario gradual --ramp-up 10
+```
+
+### Collection doğrulama (`--smoke-test`)
+
+Tam yük testinden önce collection ve ortam değişkenlerinin doğru çözüldüğünü doğrulayın:
+
+```bash
+deli -c collection.json -E staging.postman_environment.json --smoke-test -o smoke_report.html
+```
+
+5 kullanıcı, kullanıcı başına bir iterasyon — hızlı bağlantı ve yanıt kontrolü.
+
+### Stres testi (`-s`)
+
+SLA eşiği aşılana kadar fazlı ramp ile kapasite sınırını bulun:
+
+```bash
+deli -s -f stress_config.yaml -c collection.json -o stress_report.html
+```
+
+### Önerilen test akışı
+
+| Adım | Amaç | Örnek |
+|------|------|-------|
+| 1. Smoke | Endpoint'lerin yanıt verdiğini doğrula | `deli -c collection.json --smoke-test -o smoke.html` |
+| 2. Baseline | Normal trafik altında performans ölç | `deli -f examples/config_load_baseline.yaml -c collection.json -o baseline.html` |
+| 3. Spike / soak | Ani yük ve dayanıklılık | `deli -f examples/config_spike.yaml -c collection.json -o spike.html` |
+| 4. Stres | Kapasite sınırını bul | `deli -s -f stress_config.yaml -c collection.json -o stress.html` |
+
+Hazır config'ler için [examples/](examples/) dizinine ve [examples/README.md](examples/README.md) dosyasına bakın.
+
+---
+
 ## CLI referansı
 
 | Seçenek | Kısa | Açıklama |
@@ -59,9 +124,11 @@ pip install -e .
 | **--collection** | **-c** | Postman Collection v2.1 JSON yolu (yük testinde -m kullanılmıyorsa zorunlu; stres testinde hedef Postman ise zorunlu) |
 | **--config** | **-f** | YAML config yolu (yük testinde isteğe bağlı: atlanıp --users, --duration vb. kullanılabilir; stres testinde zorunlu) |
 | **--output** | **-o** | Rapor çıktı yolu (dosya veya dizin). Varsayılan: `report.html` (yük) veya `stress_report.html` (stres) |
-| **--env** | **-e** | Collection ortam değişkeni: `KEY=VALUE`. Tekrarlanabilir. Yalnızca -c (Postman) ile |
-| **--manual-url** | **-m** | Manuel hedef URL: yalnızca bu URL'ye karşı çalıştır (Postman yok). -f ve -o ile kullanın |
-| **--stress** | **-s** | Stres testi modunu çalıştır. -f stress config'e işaret etmeli; hedef -c veya -m ile |
+| **--env** | **-e** | Collection ortam değişkeni: `KEY=VALUE`. Tekrarlanabilir. Environment dosyasını geçersiz kılar. Yalnızca `-c` ile |
+| **--environment** | **-E** | Postman Environment JSON yolu. `-c` ile kullanılır; `-e` dosya değerlerini geçersiz kılar |
+| **--manual-url** | **-m** | Manuel hedef URL: yalnızca bu URL'ye karşı çalıştır (Postman yok). `-f` ve `-o` ile kullanın |
+| **--stress** | **-s** | Stres testi modunu çalıştır. `-f` stress config'e işaret etmeli; hedef `-c` veya `-m` ile |
+| **--smoke-test** | | 5 kullanıcı, bir iterasyonluk doğrulama testi (collection/ortam kontrolü) |
 | **--no-live** | | Canlı Rich panelini kapatır (headless; CI/Docker için uygun) |
 | **--junit** | | JUnit XML raporunu da PATH'e yazar (CI: Jenkins, GitLab vb.) |
 | **--json** | | JSON raporunu da PATH'e yazar (makine okunabilir metrikler) |
@@ -84,45 +151,57 @@ pip install -e .
 
 ## Kullanım örnekleri
 
+Aşağıdaki bölümler yaygın görevleri uçtan uca açıklar: komutun ne yaptığı, ne zaman kullanılacağı ve raporda nelere bakılacağı.
+
 ### 1. Postman collection ile yük testi (temel)
 
-**Örnek:** Postman collection ile yük testi ve varsayılan çıktı `report.html`.
+**Ne zaman:** API akışınız Postman'de tanımlı ve collection'daki tüm isteklere karşı tekrarlanabilir yük uygulamak istiyorsunuz.
+
+**Temel çalıştırma** — config kullanıcı, süre ve senaryoyu belirler; varsayılan çıktı bulunduğunuz dizinde `report.html`:
 
 ```bash
 deli -c path/to/collection.json -f config.yaml
 ```
 
-**Örnek:** Aynı, ancak raporu belirli bir dosyaya yaz.
+**Belirli rapor dosyası:**
 
 ```bash
 deli -c path/to/collection.json -f config.yaml -o report.html
 ```
 
-**Örnek:** Raporu bir dizine yaz (dizin içinde `report.html` oluşturur).
+**Rapor dizini** — `-o` bir klasöre işaret ederse `deli` içinde `report.html` oluşturur (tarihli çalıştırmalar için uygun):
 
 ```bash
-deli -c path/to/collection.json -f config.yaml -o ./reports/2025-02/
+deli -c path/to/collection.json -f config.yaml -o ./reports/2026-06-17/
 ```
 
-**Örnek:** Boşluk içeren collection yolu — tırnak kullanın.
+**Boşluk içeren yol** — collection yolunu tırnak içine alın:
 
 ```bash
 deli -c "/home/user/Downloads/My API.postman_collection.json" -f config.yaml -o report.html
 ```
 
+**Depodaki örnek** — kendi collection'ınız olmadan denemek için:
+
+```bash
+deli -c examples/sample_collection.json -f examples/config_smoke.yaml -o report_smoke.html --no-live
+```
+
+**Raporda kontrol edilecekler:** Test Kararı (SLA varsa geçti/kaldı), zaman içinde TPS, P95/P99 gecikme, endpoint tablosu (en yavaş rotalar üstte), SLA ihlal listesi.
+
 ---
 
-### 2. Yük testi — `-e` seçeneği (ortam değişkenleri)
+### 2. Ortam değişkenleri (`-e`) ve environment dosyası (`-E`)
 
-Collection'daki `{{base_url}}` gibi değişkenleri çalışma anında geçersiz kılmak için `-e` kullanın. Birden fazla `-e` verilebilir.
+**Ne zaman:** Collection `{{base_url}}`, `{{api_key}}` gibi Postman değişkenleri kullanıyor ve her çalıştırmada farklı hedefe yönlendirmek istiyorsunuz.
 
-**Örnek:** Tek değişken.
+**Tek değişken:**
 
 ```bash
 deli -c collection.json -f config.yaml -e base_url=https://api.example.com -o report.html
 ```
 
-**Örnek:** Birden fazla değişken.
+**Birden fazla değişken:**
 
 ```bash
 deli -c collection.json -f config.yaml \
@@ -132,42 +211,103 @@ deli -c collection.json -f config.yaml \
   -o report.html
 ```
 
----
-
-### 3. Yük testi — config geçersiz kılmaları (komut satırı)
-
-Config dosyasındaki değerleri CLI seçenekleriyle geçersiz kılın. `-f` ile verilen YAML'daki ilgili anahtar, seçenek verildiğinde geçersiz kalır.
-
-**Örnek — `--users`:** `deli -m https://api.example.com/health -f config.yaml -o report.html --users 80 --no-live`
-
-**Örnek — `--duration`:** `deli -c collection.json -f config.yaml -o report.html --duration 120 --no-live`
-
-**Örnek — `--scenario`:** `deli -m https://httpbin.org/get -f config.yaml -o report.html --scenario gradual --no-live`
-
-**Örnek — config dosyası olmadan (-f atlanır):** Sadece CLI parametreleriyle çalıştırma (varsayılan: 10 kullanıcı, 60 sn süre, constant senaryo).
+**Postman Environment dosyası** — dışa aktarılmış ortam dosyasındaki tüm değişkenleri yükleyin; belirli anahtarları `-e` ile geçersiz kılın:
 
 ```bash
-deli -m https://httpbin.org/get -o report.html --users 5 --duration 10 --no-live
-deli -c collection.json -o report.html --users 20 --duration 30 --scenario gradual --no-live
+deli -c collection.json \
+  -E staging.postman_environment.json \
+  -e base_url=https://hotfix.example.com \
+  -f config.yaml \
+  -o report.html
+```
+
+**Not:** `-e` ile verilen gizliler işlem listelerinde görünebilir; üretim pipeline'larında kısıtlı izinli environment dosyalarını tercih edin.
+
+---
+
+### 3. Collection smoke testi (`--smoke-test`)
+
+**Ne zaman:** Collection dışa aktarıldıktan sonra, ortam değişkenleri değiştiğinde veya uzun soak testinden önce — tüm isteklerin çözüldüğünü ve yanıt döndüğünü hızlıca doğrulamak için.
+
+```bash
+deli -c collection.json -E staging.postman_environment.json --smoke-test -o smoke_report.html
+```
+
+5 sanal kullanıcı, kullanıcı başına bir iterasyon. Hatalar terminalde ve `smoke_report.html` içinde hemen görünür. CI ile birlikte:
+
+```bash
+deli -c collection.json --smoke-test -o smoke_report.html --junit ci/smoke.xml --no-live
 ```
 
 ---
 
-### 4. Yük testi — `--no-live` seçeneği (headless)
+### 4. Config geçersiz kılmaları (komut satırı)
 
-Canlı Rich paneli istemiyorsanız (CI, Docker, script) `--no-live` kullanın.
+**Ne zaman:** Paylaşılan bir YAML config'iniz var ancak tek bir çalıştırma için kullanıcı sayısı, süre veya senaryoyu dosyayı kopyalamadan değiştirmek istiyorsunuz.
 
-**Örnek:** Headless çalıştırma.
+CLI bayrakları `-f` YAML'daki eşleşen anahtarları geçersiz kılar. Staging'de tek seferlik 80 kullanıcı örneği:
+
+```bash
+deli -m https://api.example.com/health -f config.yaml -o report.html --users 80 --no-live
+```
+
+**Süreyi 2 dakikaya çıkarma:**
+
+```bash
+deli -c collection.json -f config.yaml -o report.html --duration 120 --no-live
+```
+
+**Kademeli ramp senaryosu:**
+
+```bash
+deli -m https://httpbin.org/get -f config.yaml -o report.html --scenario gradual --ramp-up 30 --no-live
+```
+
+**Config dosyası olmadan** — tüm parametreler komut satırında (varsayılan: 10 kullanıcı, 60 sn, `constant`):
+
+```bash
+deli -m https://httpbin.org/get -o report.html --users 5 --duration 10 --no-live
+deli -c collection.json -o report.html --users 20 --duration 30 --scenario gradual --ramp-up 15 --no-live
+```
+
+**SLA komut satırından:**
+
+```bash
+deli -c collection.json -f config.yaml -o report.html \
+  --sla-p95 400 --sla-p99 800 --sla-error-rate 0.5
+```
+
+---
+
+### 5. Headless mod (`--no-live`)
+
+**Ne zaman:** CI runner, Docker, cron veya TTY olmayan ortamlar. Canlı Rich paneli kapatılır; metrikler saniyede bir stdout'a yazılır.
 
 ```bash
 deli -c collection.json -f config.yaml -o report.html --no-live
 ```
 
+Tipik CI adımı:
+
+```bash
+deli -c collection.json -f examples/config_smoke.yaml \
+  -o report.html \
+  --junit test-results/deli.xml \
+  --json test-results/deli.json \
+  --no-live
+```
+
+JUnit SLA ihlallerini başarısız test olarak işaretler; JSON özel kapılar veya panolar için kullanılabilir.
+
 ---
 
-### 5. Yük testi — senaryo örnekleri (config)
+### 6. Yük senaryoları (config)
 
-**Sabit yük (constant)** — Sabit kullanıcı sayısı, belirli süre:
+Her senaryo farklı bir performans sorusunu yanıtlar. Tekrarlanabilir çalıştırmalar için senaryo başına ayrı YAML dosyası kullanın.
+
+#### Sabit yük (constant)
+
+**Soru:** Sistem sabit eşzamanlılık altında nasıl davranıyor?
 
 ```yaml
 # config_constant.yaml
@@ -183,7 +323,9 @@ scenario: constant
 deli -c collection.json -f config_constant.yaml -o report_constant.html
 ```
 
-**Kademeli (gradual)** — Kademeli kullanıcı artışı, sonra süre boyunca sabit:
+#### Kademeli ramp (gradual)
+
+**Soru:** Trafik yumuşak artırıldığında başlangıçta gecikme sıçraması oluyor mu?
 
 ```yaml
 # config_gradual.yaml
@@ -199,7 +341,9 @@ scenario: gradual
 deli -c collection.json -f config_gradual.yaml -o report_gradual.html
 ```
 
-**Spike** — Önce ramp, ortada ani yük artışı, sonra düşüş:
+#### Spike
+
+**Soru:** Ani trafik artışında (flaş satış, viral olay) ne oluyor ve sistem toparlanıyor mu?
 
 ```yaml
 # config_spike.yaml
@@ -216,7 +360,11 @@ spike_duration_seconds: 15
 deli -c collection.json -f config_spike.yaml -o report_spike.html
 ```
 
-**SLA (raporda ihlal gösterimi)** — İsteğe bağlı; rapor P95/P99/hata oranı ihlallerini listeler:
+Spike penceresinde etkin eşzamanlılık `users + spike_users` (bu örnekte 50).
+
+#### SLA doğrulama
+
+**Soru:** Çalıştırma SLO'larımızı karşıladı mı? İhlaller rapor kararında listelenir.
 
 ```yaml
 # config_with_sla.yaml
@@ -234,67 +382,86 @@ sla_error_rate_pct: 1.0
 deli -c collection.json -f config_with_sla.yaml -o report_sla.html
 ```
 
-**Hazır senaryo config'leri** — `examples/` dizininde yaygın senaryolar için config'ler bulunur: smoke (`config_smoke.yaml`), baseline load (`config_load_baseline.yaml`), yüksek yük (`config_load_stress.yaml`), spike (`config_spike.yaml`), soak/dayanıklılık (`config_soak.yaml`), gradual ramp (`config_ramp_gradual.yaml`). Kısa tablo ve çalıştırma komutları için [examples/README.md](examples/README.md) dosyasına bakın.
+#### `examples/` dizinindeki hazır config'ler
+
+| Dosya | Amaç |
+|-------|------|
+| `config_smoke.yaml` | Minimal yük; deploy sonrası hızlı kontrol |
+| `config_load_baseline.yaml` | Normal beklenen trafik; regresyon tabanı |
+| `config_load_stress.yaml` | Kapasiteye doğru ağır sabit yük |
+| `config_spike.yaml` | Ani trafik artışı |
+| `config_soak.yaml` | Uzun dayanıklılık; sızıntı ve bozulma |
+| `config_ramp_gradual.yaml` | 0'dan hedef kullanıcıya yumuşak ramp |
+
+```bash
+deli -f examples/config_load_baseline.yaml -c examples/sample_collection.json -o report_baseline.html --no-live
+```
+
+Detaylı tablo ve komutlar için [examples/README.md](examples/README.md) dosyasına bakın.
 
 ---
 
-### 6. Manuel URL modu (`-m`) — Postman kullanmadan tek URL
+### 7. Manuel URL modu (`-m`) — Postman kullanmadan tek URL
 
-**Örnek:** Tek URL'e yük testi; config ve output zorunlu.
+**Ne zaman:** Hızlı sağlık kontrolü veya tek endpoint verim testi; Postman collection tutmaya gerek yok.
 
 ```bash
 deli -m https://api.example.com/health -f config.yaml -o report.html
 ```
 
-**Örnek:** Farklı base path.
+**Aynı hostta farklı path:**
 
 ```bash
 deli -m https://api.example.com/v1/users -f config.yaml -o report_manual.html
 ```
 
-**Örnek:** Manuel URL + headless.
+**Headless tek URL benchmark:**
 
 ```bash
 deli -m https://httpbin.org/get -f config.yaml -o report.html --no-live
 ```
 
-`-m` kullanıldığında `-c` ve `-e` kullanılmaz; hedef yalnızca verilen URL'dir.
+`-m` kullanıldığında `-c` ve `-e` yok sayılır; yalnızca verilen URL test edilir.
 
 ---
 
-### 7. Stres testi (`-s`) — Ayrı mod, ayrı config
+### 8. Stres testi (`-s`) — Ayrı mod, ayrı config
 
-Stres testi için **-s** ve **stres'e özel YAML** gerekir. Hedef **-c** (Postman) veya **-m** (manuel URL) ile verilir.
+**Ne zaman:** Maksimum sürdürülebilir yükü veya gecikme/hata SLO'larının aşıldığı noktayı bulmak gerekiyor. Stres modu yük testinden ayrıdır: farklı config şeması, fazlı ramp, ihlalde otomatik durma.
 
-**Örnek:** Stres testi, hedef Postman collection.
+Stres testi için **`-s`** ve **stres'e özel YAML** gerekir. Hedef **`-c`** (Postman) veya **`-m`** (manuel URL) ile verilir.
+
+**Postman hedefi:**
 
 ```bash
 deli -s -f stress_config.yaml -c collection.json -o stress_report.html
 ```
 
-**Örnek:** Stres testi, hedef manuel URL.
+**Manuel URL hedefi:**
 
 ```bash
 deli -s -f stress_config.yaml -m https://api.example.com/health -o stress_report.html
 ```
 
-**Örnek:** Stres testi, çıktıyı dizine yaz (içinde `stress_report.html` oluşur).
+**Çıktı dizini:**
 
 ```bash
 deli -s -f stress_config.yaml -c collection.json -o ./stress_results/
 ```
 
-**Örnek:** Stres testi, headless.
+**Headless stres çalıştırması:**
 
 ```bash
 deli -s -f stress_config.yaml -c collection.json -o stress_report.html --no-live
 ```
 
+**Stres raporunda ek KPI'lar:** Kırılma Noktası, Maksimum Sürdürülebilir Yük, faz sonuçları tablosu.
+
 ---
 
-### 8. Stres testi — senaryo örnekleri (stress config)
+### 9. Stres senaryoları
 
-**Linear overload** — Kullanıcı sayısı kademeli artar; SLA aşılınca test durur.
+**Linear overload** — Kullanıcı sayısı kademeli artar; SLA aşılınca test durur. P95 veya hata oranının bozulduğu yük seviyesini bulur.
 
 ```yaml
 # stress_linear.yaml
@@ -314,7 +481,7 @@ scenario: linear_overload
 deli -s -f stress_linear.yaml -c collection.json -o stress_linear.html
 ```
 
-**Spike stress** — Tek fazda yüksek kullanıcı sayısı, belirli süre.
+**Spike stress** — `spike_hold_seconds` boyunca yüksek eşzamanlılık; ani yük patlaması davranışını test eder.
 
 ```yaml
 # stress_spike.yaml
@@ -334,7 +501,7 @@ spike_hold_seconds: 45
 deli -s -f stress_spike.yaml -c collection.json -o stress_spike.html
 ```
 
-**Soak + stress** — Önce soak (düşük yük), sonra kademeli artış.
+**Soak + stress** — Önce düşük yükte uzun süre (`soak_users`, `soak_duration_seconds`), sonra kademeli artış; bellek sızıntısı gibi sorunları aşırı yüklemeden önce yakalar.
 
 ```yaml
 # stress_soak.yaml
@@ -356,7 +523,7 @@ deli -s -f stress_soak.yaml -c collection.json -o stress_soak.html
 
 ---
 
-### 9. Sürüm
+### 10. Sürüm
 
 **Örnek:** Sürüm bilgisi.
 
@@ -368,7 +535,7 @@ deli --version
 
 ---
 
-### 10. Docker örnekleri
+### 11. Docker örnekleri
 
 **Build:**
 
@@ -424,7 +591,7 @@ docker run --rm --user $(id -u):$(id -g) -v $(pwd)/reports:/tmp deli \
 
 ---
 
-### 11. Tam yük config örneği
+### 12. Tam yük config örneği
 
 ```yaml
 # config.yaml — yük testi
@@ -447,7 +614,7 @@ sla_error_rate_pct: 0.5
 
 ---
 
-### 12. Tam stres config örneği
+### 13. Tam stres config örneği
 
 ```yaml
 # stress_config.yaml — stres testi (-s)
@@ -520,9 +687,11 @@ Her seçenek ve config anahtarının ne anlama geldiği, neden kullanılacağı 
 | **--collection** (-c) | Postman Collection v2.1 JSON dosya yolu. Tekrarlanacak HTTP isteklerini tanımlar. | API akışınız Postman'de tanımlıysa; -m kullanılmıyorsa yük testinde zorunlu; hedef Postman ise stres testinde zorunlu. | Dosya geçerli v2.1 JSON olmalı. |
 | **--config** (-f) | YAML config yolu (yük veya stres parametreleri). | Tekrarlanabilir çalıştırma, paylaşılan config; yük testinde isteğe bağlı (sadece CLI geçersiz kılmaları kullanılabilir); **stres testinde zorunlu**. | Stres testi her zaman -f gerektirir. |
 | **--output** (-o) | HTML raporunun (ve isteğe bağlı JUnit/JSON) yazılacağı yer. | Sonuçları saklamak veya CI için. Varsayılan: `report.html` (yük) veya `stress_report.html` (stres). | Yol bir dizinse, rapor dosyası o dizin içinde varsayılan adla oluşturulur. |
-| **--env** (-e) | Collection değişkeni geçersiz kılma: `KEY=VALUE`. Tekrarlanabilir. | Collection'ı düzenlemeden farklı ortamlara (örn. `base_url`) yönlendirmek. Yalnızca -c ile. | -e içindeki gizliler işlem listelerinde görünebilir; hassas veri için ortam dosyaları tercih edin. |
-| **--manual-url** (-m) | Tek hedef URL; Postman yok. | Tek endpoint için hızlı test. -f ve -o ile kullanın. | -m kullanıldığında -c ve -e yok sayılır. **Yalnızca test yetkiniz olan URL'lerde kullanın.** |
-| **--stress** (-s) | Stres testi modunu aç (SLA ihlaline kadar fazlı ramp). | Kırılma noktası ve maksimum sürdürülebilir yükü bulmak. -f stress config'e işaret etmeli; hedef -c veya -m ile. | Stres testleri yüksek yük üretir; yetkilendirmeden emin olun. |
+| **--env** (-e) | Collection değişkeni geçersiz kılma: `KEY=VALUE`. Tekrarlanabilir. | Collection'ı düzenlemeden farklı ortamlara (örn. `base_url`) yönlendirmek. Yalnızca `-c` ile. | `-e` içindeki gizliler işlem listelerinde görünebilir; hassas veri için ortam dosyaları tercih edin. |
+| **--environment** (-E) | Postman Environment JSON dosya yolu. | Çok sayıda `{{variable}}` içeren collection'larda ortamı tek dosyadan yüklemek. | `-c` ile birlikte kullanılır; `-e` dosyadaki değerleri geçersiz kılar. |
+| **--manual-url** (-m) | Tek hedef URL; Postman yok. | Tek endpoint için hızlı test. `-f` ve `-o` ile kullanın. | `-m` kullanıldığında `-c` ve `-e` yok sayılır. **Yalnızca test yetkiniz olan URL'lerde kullanın.** |
+| **--stress** (-s) | Stres testi modunu aç (SLA ihlaline kadar fazlı ramp). | Kırılma noktası ve maksimum sürdürülebilir yükü bulmak. `-f` stress config'e işaret etmeli; hedef `-c` veya `-m` ile. | Stres testleri yüksek yük üretir; yetkilendirmeden emin olun. |
+| **--smoke-test** | 5 kullanıcı, bir iterasyonluk doğrulama testi. | Collection/ortam değişikliği sonrası hızlı bağlantı kontrolü; ağır testten önce. | Tam yük testi değildir; yalnızca temel doğrulama için. |
 | **--no-live** | Canlı Rich panelini kapat. | TTY olmayan CI, Docker veya script ortamları. | TTY yoksa saniyede bir satır metrik yazılır. |
 | **--junit** PATH | JUnit XML raporunu da yaz. | CI entegrasyonu (Jenkins, GitLab vb.); SLA ihlalleri başarısız test olarak görünür. | PATH yazılabilir olmalı. |
 | **--json** PATH | JSON metriklerini de yaz. | Özel pipeline veya panolar için makine okunabilir metrikler. | PATH yazılabilir olmalı. |
