@@ -1,4 +1,4 @@
-# deli 🥪
+# deli
 
 **deli** is a high-performance, lightweight, and modern load testing engine. It focuses on speed, low resource usage, and developer experience.
 
@@ -6,7 +6,7 @@
 
 ---
 
-## 🚀 Features
+## Features
 
 *   **High Performance:**
     *   **Async I/O:** Asynchronous architecture built on `asyncio` and `httpx` (HTTP/2 support).
@@ -46,7 +46,7 @@
 
 ---
 
-## 📦 Installation
+## Installation
 
 ```bash
 # From project root
@@ -64,7 +64,7 @@ pip install -e .
 
 ---
 
-## ⚡ Quick start
+## Quick start
 
 ### 1. Run a simple load test
 
@@ -239,7 +239,7 @@ For more examples and scenario configs, see [examples/README.md](examples/README
 
 ---
 
-## 📊 Performance notes
+## Performance notes
 
 `deli` includes aggressive performance optimizations. See [PERFORMANCE.md](PERFORMANCE.md) for details.
 
@@ -250,7 +250,7 @@ Key optimizations:
 
 ---
 
-## 🛠 Development
+## Development
 
 ```bash
 # Run linter
