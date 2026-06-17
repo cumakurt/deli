@@ -31,10 +31,18 @@ def _validate_stress_config(c: StressConfig) -> None:
         raise DeliConfigError("max_users must be >= initial_users")
     if c.think_time_ms < 0:
         raise DeliConfigError("think_time_ms must be >= 0")
-    if c.scenario == StressScenario.SPIKE_STRESS and (c.spike_users <= 0 or c.spike_hold_seconds <= 0):
-        raise DeliConfigError("spike_stress scenario requires spike_users > 0 and spike_hold_seconds > 0")
-    if c.scenario == StressScenario.SOAK_STRESS and (c.soak_users <= 0 or c.soak_duration_seconds <= 0):
-        raise DeliConfigError("soak_stress scenario requires soak_users > 0 and soak_duration_seconds > 0")
+    if c.scenario == StressScenario.SPIKE_STRESS and (
+        c.spike_users <= 0 or c.spike_hold_seconds <= 0
+    ):
+        raise DeliConfigError(
+            "spike_stress scenario requires spike_users > 0 and spike_hold_seconds > 0"
+        )
+    if c.scenario == StressScenario.SOAK_STRESS and (
+        c.soak_users <= 0 or c.soak_duration_seconds <= 0
+    ):
+        raise DeliConfigError(
+            "soak_stress scenario requires soak_users > 0 and soak_duration_seconds > 0"
+        )
 
 
 def load_stress_config(path: str | Path) -> StressConfig:
@@ -56,7 +64,11 @@ def load_stress_config(path: str | Path) -> StressConfig:
     try:
         scenario = StressScenario(scenario_str)
     except ValueError:
-        scenario = StressScenario.LINEAR_OVERLOAD
+        allowed = ", ".join(s.value for s in StressScenario)
+        raise DeliConfigError(
+            f"Unknown stress scenario: {scenario_str}",
+            context={"path": str(path), "allowed": allowed},
+        )
 
     try:
         config = StressConfig(
@@ -79,5 +91,10 @@ def load_stress_config(path: str | Path) -> StressConfig:
         raise DeliConfigError(f"Invalid stress config value: {e}") from e
 
     _validate_stress_config(config)
-    logger.debug("Loaded stress config: scenario=%s, initial_users=%s, max_users=%s", config.scenario.value, config.initial_users, config.max_users)
+    logger.debug(
+        "Loaded stress config: scenario=%s, initial_users=%s, max_users=%s",
+        config.scenario.value,
+        config.initial_users,
+        config.max_users,
+    )
     return config

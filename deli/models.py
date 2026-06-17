@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 
 class LoadScenario(str, Enum):
@@ -23,13 +22,22 @@ class LoadScenario(str, Enum):
 
 class ParsedRequest:
     """A single HTTP request parsed from Postman collection.
-    
+
     Uses __slots__ for memory efficiency - each instance saves ~100 bytes.
     Headers are cached after first preparation to avoid repeated dict creation.
     """
-    
-    __slots__ = ("name", "method", "url", "headers", "body", "folder_path", "_prepared_headers")
-    
+
+    __slots__ = (
+        "name",
+        "method",
+        "url",
+        "headers",
+        "body",
+        "folder_path",
+        "_prepared_headers",
+        "_body_bytes",
+    )
+
     def __init__(
         self,
         name: str,
@@ -46,37 +54,45 @@ class ParsedRequest:
         self.body = body
         self.folder_path = folder_path
         self._prepared_headers: dict[str, str] | None = None
+        self._body_bytes: bytes | None = None
 
     def get_prepared_headers(self) -> dict[str, str]:
         """Get prepared headers with Content-Type added if needed.
-        
+
         Computed once on first call, then cached. Zero allocation on cache hit.
         """
         if self._prepared_headers is not None:
             return self._prepared_headers
-        
+
         h = dict(self.headers)
         if self.body and "content-type" not in {k.lower() for k in h}:
             h["Content-Type"] = "application/json"
         self._prepared_headers = h
         return self._prepared_headers
-    
+
     def __repr__(self) -> str:
         return f"ParsedRequest(name={self.name!r}, method={self.method!r}, url={self.url!r})"
 
 
 class RequestResult:
     """Result of a single request execution.
-    
+
     Uses __slots__ for memory efficiency - each instance saves ~100 bytes.
     This is the most allocated object during load tests; optimization critical.
     """
-    
+
     __slots__ = (
-        "request_name", "folder_path", "method", "url", 
-        "status_code", "response_time_ms", "success", "error", "timestamp"
+        "request_name",
+        "folder_path",
+        "method",
+        "url",
+        "status_code",
+        "response_time_ms",
+        "success",
+        "error",
+        "timestamp",
     )
-    
+
     def __init__(
         self,
         request_name: str,
@@ -98,7 +114,7 @@ class RequestResult:
         self.success = success
         self.error = error
         self.timestamp = timestamp
-    
+
     def __repr__(self) -> str:
         return (
             f"RequestResult(name={self.request_name!r}, status={self.status_code}, "
@@ -109,7 +125,7 @@ class RequestResult:
 @dataclass(slots=True)
 class RunConfig:
     """Runtime configuration from YAML.
-    
+
     Uses slots=True for memory efficiency. Immutable after creation.
     """
 
@@ -131,7 +147,7 @@ class RunConfig:
 @dataclass(slots=True)
 class AggregateMetrics:
     """Aggregated metrics for a time window or full run.
-    
+
     Uses slots=True for memory efficiency. response_times_ms is only
     populated when histogram is needed (report generation), keeping
     memory low during live monitoring.
@@ -164,12 +180,13 @@ class AggregateMetrics:
 
 # --- Stress testing ---
 
+
 class StressScenario(str, Enum):
     """Stress test pattern."""
 
     LINEAR_OVERLOAD = "linear_overload"  # Gradual user increase until threshold
-    SPIKE_STRESS = "spike_stress"        # Sudden spike then hold
-    SOAK_STRESS = "soak_stress"          # Soak at baseline then ramp (soak + stress)
+    SPIKE_STRESS = "spike_stress"  # Sudden spike then hold
+    SOAK_STRESS = "soak_stress"  # Soak at baseline then ramp (soak + stress)
 
 
 @dataclass(slots=True)

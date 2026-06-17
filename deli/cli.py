@@ -15,14 +15,6 @@ import sys
 from pathlib import Path
 from typing import Any, Coroutine
 
-# Try to use uvloop for 2-4x faster async performance
-_HAS_UVLOOP = False
-try:
-    import uvloop
-    _HAS_UVLOOP = True
-except ImportError:
-    pass
-
 from . import __version__
 from .config import load_config, validate_run_config
 from .exceptions import DeliCollectionError, DeliConfigError, DeliError, DeliRunnerError
@@ -30,16 +22,25 @@ from .logging_config import get_logger
 from .manual import build_manual_requests, manual_report_name
 from .models import LoadScenario, RunConfig
 from .postman import load_collection
-from .runner import run_manual_test, run_test
+from .runner import run_manual_test, run_postman_test_mode, run_test
 from .stress_config import load_stress_config
 from .stress_runner import run_stress_test
+
+# Try to use uvloop for 2-4x faster async performance
+_HAS_UVLOOP = False
+try:
+    import uvloop
+
+    _HAS_UVLOOP = True
+except ImportError:
+    pass
 
 logger = get_logger("cli")
 
 
 def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
     """Run async coroutine with optimal event loop.
-    
+
     Uses uvloop.run() on Python 3.12+ for best performance.
     Falls back to asyncio.run() with uvloop policy on older versions.
     Disables GC during execution for consistent latency.
@@ -47,7 +48,7 @@ def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
     # Disable GC during test for consistent latency
     gc_was_enabled = gc.isenabled()
     gc.disable()
-    
+
     try:
         if _HAS_UVLOOP:
             # uvloop.run() is the recommended way since Python 3.12
@@ -79,6 +80,9 @@ DEFAULT_DURATION_SECONDS = 60.0
 DEFAULT_RAMP_UP_SECONDS = 0.0
 DEFAULT_ITERATIONS = 0
 DEFAULT_THINK_TIME_MS = 0.0
+DEFAULT_LOAD_REPORT = "report.html"
+DEFAULT_STRESS_REPORT = "stress_report.html"
+DEFAULT_TEST_REPORT = "test_report.html"
 
 
 def _build_config_from_args(args: argparse.Namespace) -> RunConfig:
@@ -89,7 +93,9 @@ def _build_config_from_args(args: argparse.Namespace) -> RunConfig:
         ramp_up_seconds=args.ramp_up if args.ramp_up is not None else DEFAULT_RAMP_UP_SECONDS,
         duration_seconds=args.duration if args.duration is not None else DEFAULT_DURATION_SECONDS,
         iterations=args.iterations if args.iterations is not None else DEFAULT_ITERATIONS,
-        think_time_ms=args.think_time_ms if args.think_time_ms is not None else DEFAULT_THINK_TIME_MS,
+        think_time_ms=args.think_time_ms
+        if args.think_time_ms is not None
+        else DEFAULT_THINK_TIME_MS,
         scenario=scenario,
         spike_users=args.spike_users if args.spike_users is not None else 0,
         spike_duration_seconds=args.spike_duration if args.spike_duration is not None else 0.0,
@@ -104,8 +110,17 @@ def _build_config_from_args(args: argparse.Namespace) -> RunConfig:
 def _build_config_with_overrides(config_path: Path, args: argparse.Namespace) -> RunConfig | None:
     """Load config from file and apply CLI overrides. Returns None if no overrides were given."""
     override_keys = (
-        "users", "duration", "ramp_up", "scenario", "think_time_ms", "iterations",
-        "spike_users", "spike_duration", "sla_p95_ms", "sla_p99_ms", "sla_error_rate_pct",
+        "users",
+        "duration",
+        "ramp_up",
+        "scenario",
+        "think_time_ms",
+        "iterations",
+        "spike_users",
+        "spike_duration",
+        "sla_p95_ms",
+        "sla_p99_ms",
+        "sla_error_rate_pct",
     )
     has_override = any(getattr(args, k, None) is not None for k in override_keys)
     if not has_override:
@@ -128,7 +143,9 @@ def _build_config_with_overrides(config_path: Path, args: argparse.Namespace) ->
         sla_p95_ms=args.sla_p95_ms if args.sla_p95_ms is not None else base.sla_p95_ms,
         sla_p99_ms=args.sla_p99_ms if args.sla_p99_ms is not None else base.sla_p99_ms,
         sla_error_rate_pct=(
-            args.sla_error_rate_pct if args.sla_error_rate_pct is not None else base.sla_error_rate_pct
+            args.sla_error_rate_pct
+            if args.sla_error_rate_pct is not None
+            else base.sla_error_rate_pct
         ),
     )
     validate_run_config(merged)
@@ -155,8 +172,8 @@ def main() -> int:
     parser.add_argument(
         "-o",
         "--output",
-        default="report.html",
-        help="Output path for HTML report (file or directory; default: report.html)",
+        default=None,
+        help="Output path for HTML report (default: report.html, or stress_report.html with --stress)",
     )
     parser.add_argument(
         "--junit",
@@ -178,6 +195,14 @@ def main() -> int:
         help="Environment variable for collection (can be repeated). Overrides file env. Only with -c.",
     )
     parser.add_argument(
+        "-E",
+        "--environment",
+        "--env-file",
+        dest="environment_path",
+        metavar="PATH",
+        help="Path to Postman Environment JSON file. Used with -c; -e overrides its values.",
+    )
+    parser.add_argument(
         "-m",
         "--manual-url",
         metavar="URL",
@@ -196,18 +221,92 @@ def main() -> int:
         action="store_true",
         help="Disable live Rich dashboard (headless mode)",
     )
+    parser.add_argument(
+        "--test-mode",
+        "--smoke-test",
+        action="store_true",
+        dest="test_mode",
+        help="Read collection/environment and run a 5-user one-iteration verification test.",
+    )
     # Config overrides (override values from -f YAML when provided)
-    parser.add_argument("--users", type=int, default=None, help="Override config: number of virtual users")
-    parser.add_argument("--duration", type=float, default=None, metavar="SEC", help="Override config: test duration in seconds")
-    parser.add_argument("--ramp-up", type=float, default=None, metavar="SEC", dest="ramp_up", help="Override config: ramp-up time in seconds")
-    parser.add_argument("--scenario", choices=["constant", "gradual", "spike"], default=None, help="Override config: load scenario")
-    parser.add_argument("--think-time", type=float, default=None, metavar="MS", dest="think_time_ms", help="Override config: think time between requests (ms)")
-    parser.add_argument("--iterations", type=int, default=None, help="Override config: iterations per user (0 = run for duration)")
-    parser.add_argument("--spike-users", type=int, default=None, metavar="N", dest="spike_users", help="Override config: extra users during spike (spike scenario)")
-    parser.add_argument("--spike-duration", type=float, default=None, metavar="SEC", dest="spike_duration", help="Override config: spike duration in seconds (spike scenario)")
-    parser.add_argument("--sla-p95", type=float, default=None, metavar="MS", dest="sla_p95_ms", help="Override config: SLA P95 latency (ms)")
-    parser.add_argument("--sla-p99", type=float, default=None, metavar="MS", dest="sla_p99_ms", help="Override config: SLA P99 latency (ms)")
-    parser.add_argument("--sla-error-rate", type=float, default=None, metavar="PCT", dest="sla_error_rate_pct", help="Override config: SLA max error rate (%%)")
+    parser.add_argument(
+        "--users", type=int, default=None, help="Override config: number of virtual users"
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        metavar="SEC",
+        help="Override config: test duration in seconds",
+    )
+    parser.add_argument(
+        "--ramp-up",
+        type=float,
+        default=None,
+        metavar="SEC",
+        dest="ramp_up",
+        help="Override config: ramp-up time in seconds",
+    )
+    parser.add_argument(
+        "--scenario",
+        choices=["constant", "gradual", "spike"],
+        default=None,
+        help="Override config: load scenario",
+    )
+    parser.add_argument(
+        "--think-time",
+        type=float,
+        default=None,
+        metavar="MS",
+        dest="think_time_ms",
+        help="Override config: think time between requests (ms)",
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=None,
+        help="Override config: iterations per user (0 = run for duration)",
+    )
+    parser.add_argument(
+        "--spike-users",
+        type=int,
+        default=None,
+        metavar="N",
+        dest="spike_users",
+        help="Override config: extra users during spike (spike scenario)",
+    )
+    parser.add_argument(
+        "--spike-duration",
+        type=float,
+        default=None,
+        metavar="SEC",
+        dest="spike_duration",
+        help="Override config: spike duration in seconds (spike scenario)",
+    )
+    parser.add_argument(
+        "--sla-p95",
+        type=float,
+        default=None,
+        metavar="MS",
+        dest="sla_p95_ms",
+        help="Override config: SLA P95 latency (ms)",
+    )
+    parser.add_argument(
+        "--sla-p99",
+        type=float,
+        default=None,
+        metavar="MS",
+        dest="sla_p99_ms",
+        help="Override config: SLA P99 latency (ms)",
+    )
+    parser.add_argument(
+        "--sla-error-rate",
+        type=float,
+        default=None,
+        metavar="PCT",
+        dest="sla_error_rate_pct",
+        help="Override config: SLA max error rate (%%)",
+    )
     parser.add_argument(
         "-v",
         "--version",
@@ -217,6 +316,22 @@ def main() -> int:
     args = parser.parse_args()
 
     config_path = Path(args.config) if args.config else None
+    environment_path = Path(args.environment_path) if args.environment_path else None
+    output_path = args.output or (
+        DEFAULT_TEST_REPORT
+        if args.test_mode
+        else DEFAULT_STRESS_REPORT
+        if args.stress
+        else DEFAULT_LOAD_REPORT
+    )
+
+    if environment_path is not None and not args.collection:
+        print("Error: --environment requires -c/--collection", file=sys.stderr)
+        return 1
+
+    if args.test_mode and args.stress:
+        print("Error: --test-mode cannot be combined with --stress", file=sys.stderr)
+        return 1
 
     def handle_error(e: BaseException) -> int:
         if isinstance(e, DeliError):
@@ -228,6 +343,32 @@ def main() -> int:
         logger.exception("Unexpected error")
         print("Error: An unexpected error occurred. Check logs for details.", file=sys.stderr)
         return 1
+
+    if args.test_mode:
+        if not args.collection:
+            print("Error: --test-mode requires -c/--collection", file=sys.stderr)
+            return 1
+        try:
+            env_override = _parse_env_args(args.env)
+            _run_async(
+                run_postman_test_mode(
+                    collection_path=Path(args.collection),
+                    report_path=output_path,
+                    env_override=env_override or None,
+                    environment_path=environment_path,
+                    live=not args.no_live,
+                    junit_path=getattr(args, "junit_path", None),
+                    json_path=getattr(args, "json_path", None),
+                )
+            )
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+            return 130
+        except (DeliCollectionError, DeliRunnerError) as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+        return 0
 
     # Stress test mode: -s with -f (stress config), target via -c or -m
     if args.stress:
@@ -248,12 +389,19 @@ def main() -> int:
             collection = Path(args.collection)
             try:
                 env_override = _parse_env_args(args.env)
-                requests = load_collection(collection, env_override=env_override or None)
+                requests = load_collection(
+                    collection,
+                    env_override=env_override or None,
+                    environment_path=environment_path,
+                )
             except DeliCollectionError as e:
                 return handle_error(e)
             collection_name = collection.stem
         else:
-            print("Error: stress mode requires -c/--collection or -m/--manual-url for target", file=sys.stderr)
+            print(
+                "Error: stress mode requires -c/--collection or -m/--manual-url for target",
+                file=sys.stderr,
+            )
             return 1
         if not requests:
             print("Error: no requests to run for stress test", file=sys.stderr)
@@ -264,7 +412,7 @@ def main() -> int:
                     requests=requests,
                     config=stress_config,
                     collection_name=collection_name,
-                    report_path=args.output,
+                    report_path=output_path,
                     live=not args.no_live,
                     junit_path=getattr(args, "junit_path", None),
                     json_path=getattr(args, "json_path", None),
@@ -288,7 +436,7 @@ def main() -> int:
             _run_async(
                 run_manual_test(
                     manual_url=args.manual_url,
-                    report_path=args.output,
+                    report_path=output_path,
                     config_path=config_path,
                     live=not args.no_live,
                     junit_path=getattr(args, "junit_path", None),
@@ -321,9 +469,10 @@ def main() -> int:
         _run_async(
             run_test(
                 collection_path=collection,
-                report_path=args.output,
+                report_path=output_path,
                 config_path=config_path,
                 env_override=env_override or None,
+                environment_path=environment_path,
                 live=not args.no_live,
                 junit_path=getattr(args, "junit_path", None),
                 json_path=getattr(args, "json_path", None),

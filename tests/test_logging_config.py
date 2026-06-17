@@ -5,9 +5,7 @@ from __future__ import annotations
 import logging
 import os
 
-import pytest
-
-from deli.logging_config import get_logger, LOG_LEVEL_ENV, LOG_FORMAT_ENV
+from deli.logging_config import LOG_LEVEL_ENV, get_logger
 
 
 def test_get_logger_returns_logger() -> None:
@@ -38,7 +36,6 @@ def test_get_logger_log_level_respected() -> None:
 
 
 def test_get_logger_log_message() -> None:
-    import io
     logger = get_logger("test_msg")
     logger.info("test message")
     # No exception; handler may write to stderr

@@ -13,7 +13,6 @@ from urllib.parse import urlparse
 from .exceptions import DeliRunnerError
 from .models import ParsedRequest
 
-
 MANUAL_REQUEST_NAME = "Manual Target"
 MANUAL_FOLDER_PATH = ""
 

@@ -45,3 +45,14 @@ def test_load_stress_config_spike_stress_requires_spike_params(tmp_path: Path) -
     )
     with pytest.raises(DeliConfigError, match="spike_stress"):
         load_stress_config(bad)
+
+
+def test_load_stress_config_unknown_scenario_rejected(tmp_path: Path) -> None:
+    bad = tmp_path / "unknown_stress.yaml"
+    bad.write_text(
+        "sla_p95_ms: 500\nsla_p99_ms: 1000\nsla_error_rate_pct: 1\n"
+        "initial_users: 5\nstep_users: 5\nstep_interval_seconds: 30\nmax_users: 100\n"
+        "scenario: unknown\n"
+    )
+    with pytest.raises(DeliConfigError, match="Unknown stress scenario"):
+        load_stress_config(bad)

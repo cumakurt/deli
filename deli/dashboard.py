@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 
 from rich.console import Console
 from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich.panel import Panel
 
 from .logging_config import get_logger
 from .metrics import MetricsCollector
@@ -90,7 +90,9 @@ def create_live_panel(
     table.add_row("Remaining (ETA)", _format_remaining(remaining))
     title = Text()
     title.append("deli ", style="bold magenta")
-    title.append(f"| {config.scenario.value} | {elapsed:.1f}s / {config.duration_seconds}s", style="dim")
+    title.append(
+        f"| {config.scenario.value} | {elapsed:.1f}s / {config.duration_seconds}s", style="dim"
+    )
     title.append(f" | ETA: {_format_remaining(remaining)}", style="bold yellow")
     return Panel(
         table,

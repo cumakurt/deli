@@ -16,7 +16,7 @@ from pathlib import Path
 from .engine import create_client, run_worker
 from .exceptions import DeliRunnerError
 from .logging_config import get_logger
-from .metrics import MetricsCollector, compute_aggregate, DEFAULT_MAX_RESULTS
+from .metrics import MetricsCollector, compute_aggregate
 from .models import (
     LoadScenario,
     ParsedRequest,
@@ -60,13 +60,13 @@ async def run_phase(
     think_time_ms: float,
 ) -> tuple[list[RequestResult], float, float]:
     """Run one stress phase: N users for duration_seconds.
-    
+
     Args:
         num_users: Number of concurrent virtual users
         duration_seconds: How long to run this phase
         requests: List of requests to cycle through
         think_time_ms: Delay between requests per user
-    
+
     Returns:
         Tuple of (results list, start_timestamp, end_timestamp)
     """
@@ -78,18 +78,21 @@ async def run_phase(
     stop_event = asyncio.Event()
     start_ts = time.perf_counter()
     end_ts = start_ts + duration_seconds
-    max_in_flight = min(MAX_IN_FLIGHT_LIMIT, max(num_users * MAX_IN_FLIGHT_MULTIPLIER, MIN_IN_FLIGHT_LIMIT))
+    max_in_flight = min(
+        MAX_IN_FLIGHT_LIMIT, max(num_users * MAX_IN_FLIGHT_MULTIPLIER, MIN_IN_FLIGHT_LIMIT)
+    )
     semaphore = asyncio.Semaphore(max_in_flight)
 
     async def consume():
         """Consume results in batches for efficiency."""
         batch = []
+        sentinels_seen = 0
         # Local refs
         queue_get = result_queue.get
         queue_get_nowait = result_queue.get_nowait
         queue_empty = result_queue.empty
         collector_add_batch = collector.add_batch
-        
+
         while True:
             try:
                 # Wait with timeout for first item
@@ -97,14 +100,18 @@ async def run_phase(
                     item = await asyncio.wait_for(queue_get(), timeout=PHASE_CONSUMER_POLL_SEC)
                 except asyncio.TimeoutError:
                     continue
-                    
+
                 if item is None:
+                    sentinels_seen += 1
                     if batch:
                         collector_add_batch(batch)
-                    break
-                
+                        batch.clear()
+                    if sentinels_seen >= num_users:
+                        break
+                    continue
+
                 batch.append(item)
-                
+
                 # Drain rest of queue up to limit
                 for _ in range(1000):
                     if queue_empty():
@@ -112,17 +119,21 @@ async def run_phase(
                     try:
                         next_item = queue_get_nowait()
                         if next_item is None:
+                            sentinels_seen += 1
                             if batch:
                                 collector_add_batch(batch)
-                            return
+                                batch.clear()
+                            if sentinels_seen >= num_users:
+                                return
+                            continue
                         batch.append(next_item)
                     except asyncio.QueueEmpty:
                         break
-                
+
                 if batch:
                     collector_add_batch(batch)
                     batch.clear()
-                    
+
             except asyncio.CancelledError:
                 if batch:
                     collector_add_batch(batch)
@@ -133,7 +144,15 @@ async def run_phase(
     async with await create_client(http2=True, timeout=DEFAULT_HTTP_TIMEOUT) as client:
         workers = [
             asyncio.create_task(
-                run_worker(client, requests, think_time_ms, result_queue, stop_event, 0, semaphore=semaphore)
+                run_worker(
+                    client,
+                    requests,
+                    think_time_ms,
+                    result_queue,
+                    stop_event,
+                    0,
+                    semaphore=semaphore,
+                )
             )
             for _ in range(num_users)
         ]
@@ -224,12 +243,12 @@ def _phase_metrics(
 
 def _detect_nonlinear_latency(phases: list[StressPhaseResult]) -> int:
     """Return user count at which P95 increased non-linearly.
-    
+
     Non-linear is defined as slope > NONLINEAR_SLOPE_THRESHOLD * previous slope.
-    
+
     Args:
         phases: List of phase results to analyze
-    
+
     Returns:
         User count at which non-linearity was detected, or 0 if not found
     """
@@ -263,13 +282,17 @@ async def run_stress_test(
 ) -> StressTestResult:
     """Run stress test: ramp users phase by phase until threshold exceeded; detect breaking point etc."""
     from rich.console import Console
-    from rich.live import Live
-    from rich.table import Table
 
     if not requests:
         raise DeliRunnerError("No requests for stress test")
 
-    logger.info("Starting stress test: collection=%s, scenario=%s, initial_users=%s, max_users=%s", collection_name, config.scenario.value, config.initial_users, config.max_users)
+    logger.info(
+        "Starting stress test: collection=%s, scenario=%s, initial_users=%s, max_users=%s",
+        collection_name,
+        config.scenario.value,
+        config.initial_users,
+        config.max_users,
+    )
     console = Console()
     test_start_dt = datetime.now(timezone.utc)
     phases: list[StressPhaseResult] = []
@@ -301,7 +324,11 @@ async def run_stress_test(
             max_sustainable = config.spike_users
         # No further phases
         current_users = config.max_users + 1
-    elif config.scenario == StressScenario.SOAK_STRESS and config.soak_users > 0 and config.soak_duration_seconds > 0:
+    elif (
+        config.scenario == StressScenario.SOAK_STRESS
+        and config.soak_users > 0
+        and config.soak_duration_seconds > 0
+    ):
         # Soak phase then ramp
         res, st, et = await run_phase(
             config.soak_users,
@@ -324,7 +351,9 @@ async def run_stress_test(
     phase_idx = len(phases)
     while current_users <= config.max_users:
         if live:
-            console.print(f"[cyan]Stress phase[/cyan]: {current_users} users, {config.step_interval_seconds}s ...")
+            console.print(
+                f"[cyan]Stress phase[/cyan]: {current_users} users, {config.step_interval_seconds}s ..."
+            )
         res, st, et = await run_phase(
             current_users,
             config.step_interval_seconds,
@@ -365,14 +394,19 @@ async def run_stress_test(
         scenario=config.scenario.value,
     )
 
-    # Use same report format as load test (report.html); add timestamp so runs do not overwrite
+    # Use same report path rules as load test.
+    from .runner import _resolve_report_path
+
     out = Path(report_path)
-    if out.suffix.lower() != ".html":
-        out = out / "report.html" if not out.suffix or out.is_dir() else out.with_suffix(".html")
-    stem_ts = out.stem + "_" + datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    out = out.parent / (stem_ts + out.suffix)
-    total_duration_seconds = (last_phase_end_ts - first_phase_start_ts) if (first_phase_start_ts is not None and last_phase_end_ts is not None) else 0.0
-    report_users = max_sustainable if max_sustainable > 0 else (breaking_point_users or config.initial_users)
+    out = _resolve_report_path(out)
+    total_duration_seconds = (
+        (last_phase_end_ts - first_phase_start_ts)
+        if (first_phase_start_ts is not None and last_phase_end_ts is not None)
+        else 0.0
+    )
+    report_users = (
+        max_sustainable if max_sustainable > 0 else (breaking_point_users or config.initial_users)
+    )
     run_config = RunConfig(
         users=report_users,
         ramp_up_seconds=0,
@@ -389,7 +423,8 @@ async def run_stress_test(
         collector.add(r)
     if last_phase_end_ts is not None:
         collector.set_end_time(last_phase_end_ts)
-    from .report import generate_report, generate_junit_report, generate_json_report
+    from .report import generate_json_report, generate_junit_report, generate_report
+
     generate_report(
         out,
         collector,
@@ -423,7 +458,11 @@ async def run_stress_test(
         )
         if live:
             console.print(f"[dim]JSON report:[/dim] {json_path}")
-    logger.info("Stress test finished: max_sustainable=%s, breaking_point=%s", result.max_sustainable_load_users, result.breaking_point_users)
+    logger.info(
+        "Stress test finished: max_sustainable=%s, breaking_point=%s",
+        result.max_sustainable_load_users,
+        result.breaking_point_users,
+    )
     if live:
         console.print(f"[green]Report written to[/green] {out}")
 

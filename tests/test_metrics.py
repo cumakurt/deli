@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
-from deli.metrics import MetricsCollector, TimeSeriesPoint, compute_aggregate
-from deli.models import AggregateMetrics, RequestResult, RunConfig
-from deli.models import LoadScenario
+from deli.metrics import MetricsCollector, compute_aggregate
+from deli.models import LoadScenario, RequestResult, RunConfig
 
 
 def _result(
@@ -171,10 +168,14 @@ def test_metrics_collector_get_cached_aggregate() -> None:
 def test_compute_aggregate_with_deque() -> None:
     """compute_aggregate accepts deque (ring-buffer)."""
     from collections import deque
-    results = deque([
-        _result(timestamp_ms=100, response_time_ms=10),
-        _result(timestamp_ms=200, response_time_ms=20),
-    ], maxlen=10)
+
+    results = deque(
+        [
+            _result(timestamp_ms=100, response_time_ms=10),
+            _result(timestamp_ms=200, response_time_ms=20),
+        ],
+        maxlen=10,
+    )
     agg = compute_aggregate(results, 0, 1000)
     assert agg.total_requests == 2
     assert agg.avg_response_time_ms == 15

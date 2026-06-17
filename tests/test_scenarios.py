@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -110,26 +110,31 @@ def test_run_scenario_empty_requests_returns_immediately() -> None:
     assert start <= end
 
 
-@pytest.mark.skip(reason="run_scenario with mocks can block in some envs; covered by integration test")
+@pytest.mark.skip(
+    reason="run_scenario with mocks can block in some envs; covered by integration test"
+)
 def test_run_scenario_constant_mock_execute() -> None:
     queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
     config = _config(LoadScenario.CONSTANT, users=2, duration_seconds=0.02)
     req = ParsedRequest(name="R", method="GET", url="https://httpbin.org/get")
-    from deli.models import RequestResult
     result = RequestResult(
-        request_name="R", folder_path="", method="GET", url=req.url,
-        status_code=200, response_time_ms=10, success=True, timestamp=0,
+        request_name="R",
+        folder_path="",
+        method="GET",
+        url=req.url,
+        status_code=200,
+        response_time_ms=10,
+        success=True,
+        timestamp=0,
     )
 
     async def fake_execute(client, r, think_ms):
         return result
 
     class FakeClient:
-        pass
-
-    class FakeClient:
         async def __aenter__(self):
             return self
+
         async def __aexit__(self, *args):
             pass
 

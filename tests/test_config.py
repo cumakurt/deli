@@ -56,15 +56,33 @@ def test_load_config_validation_duration_zero(tmp_path: Path) -> None:
 
 def test_load_config_validation_spike_missing_params(tmp_path: Path) -> None:
     bad = tmp_path / "spike_bad.yaml"
-    bad.write_text("users: 10\nduration_seconds: 60\nscenario: spike\nspike_users: 0\nspike_duration_seconds: 0\n")
+    bad.write_text(
+        "users: 10\nduration_seconds: 60\nscenario: spike\nspike_users: 0\nspike_duration_seconds: 0\n"
+    )
     with pytest.raises(DeliConfigError, match="spike scenario requires"):
         load_config(bad)
 
 
 def test_load_config_sla_optional(tmp_path: Path) -> None:
-    content = "users: 5\nduration_seconds: 30\nscenario: constant\nsla_p95_ms: 400\nsla_p99_ms: 800\n"
+    content = (
+        "users: 5\nduration_seconds: 30\nscenario: constant\nsla_p95_ms: 400\nsla_p99_ms: 800\n"
+    )
     f = tmp_path / "sla.yaml"
     f.write_text(content)
     config = load_config(f)
     assert config.sla_p95_ms == 400
     assert config.sla_p99_ms == 800
+
+
+def test_load_config_unknown_scenario_rejected(tmp_path: Path) -> None:
+    bad = tmp_path / "unknown_scenario.yaml"
+    bad.write_text("users: 5\nduration_seconds: 30\nscenario: unknown\n")
+    with pytest.raises(DeliConfigError, match="Unknown scenario"):
+        load_config(bad)
+
+
+def test_load_config_invalid_optional_sla_rejected(tmp_path: Path) -> None:
+    bad = tmp_path / "bad_sla.yaml"
+    bad.write_text("users: 5\nduration_seconds: 30\nscenario: constant\nsla_p95_ms: nope\n")
+    with pytest.raises(DeliConfigError, match="Invalid config value"):
+        load_config(bad)

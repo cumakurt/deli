@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import sys
-from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -73,3 +72,31 @@ def test_main_postman_mode_requires_collection(tmp_path: Path) -> None:
     with patch.object(sys, "argv", ["deli", "-f", str(config)]):
         code = main()
         assert code == 1
+
+
+def test_main_environment_requires_collection(tmp_path: Path) -> None:
+    env = tmp_path / "environment.json"
+    env.write_text('{"values": []}')
+    with patch.object(sys, "argv", ["deli", "-m", "https://example.com", "-E", str(env)]):
+        code = main()
+        assert code == 1
+
+
+def test_main_test_mode_requires_collection() -> None:
+    with patch.object(sys, "argv", ["deli", "--test-mode"]):
+        code = main()
+        assert code == 1
+
+
+def test_main_test_mode_invokes_runner(tmp_path: Path) -> None:
+    collection = tmp_path / "collection.json"
+    collection.write_text('{"info": {}, "item": []}')
+    sentinel = object()
+    with patch.object(sys, "argv", ["deli", "--test-mode", "-c", str(collection), "--no-live"]):
+        with patch("deli.cli.run_postman_test_mode", new=Mock(return_value=sentinel)) as run_mode:
+            with patch("deli.cli._run_async", return_value=None) as run_async:
+                code = main()
+
+    assert code == 0
+    run_async.assert_called_once_with(sentinel)
+    run_mode.assert_called_once()

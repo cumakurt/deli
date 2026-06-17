@@ -12,11 +12,11 @@ from urllib.parse import urlparse, urlunparse
 import orjson
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from . import __version__ as deli_version
 from . import __author__ as deli_author
 from . import __email__ as deli_email
-from .metrics import MetricsCollector, TimeSeriesPoint
-from .models import RequestResult, RunConfig
+from . import __version__ as deli_version
+from .metrics import MetricsCollector
+from .models import AggregateMetrics, RunConfig
 
 # Footer developer links (repo from pyproject; update if moved)
 FOOTER_LINKEDIN_URL = "https://www.linkedin.com/in/cuma-kurt-34414917/"
@@ -73,6 +73,7 @@ def _get_echarts_script() -> str:
         return "<script>\n" + vendor_path.read_text(encoding="utf-8") + "\n</script>"
     return "<!-- ECharts not bundled. Add templates/vendor/echarts.min.js for offline charts. -->"
 
+
 # Raw data: full export is written to a separate JSON file (no limit); HTML report stays light
 RAW_DATA_JSON_SUFFIX = "_raw.json"
 
@@ -85,20 +86,12 @@ def _serialize(obj: Any) -> str:
 
 def _compute_violations(agg: "AggregateMetrics", config: RunConfig) -> list[str]:
     """Compute SLA violations from pre-computed aggregate (no re-aggregation)."""
-    from .models import AggregateMetrics
     violations: list[str] = []
     if config.sla_p95_ms is not None and agg.p95_ms > config.sla_p95_ms:
-        violations.append(
-            f"P95 response time {agg.p95_ms:.1f}ms exceeds SLA {config.sla_p95_ms}ms"
-        )
+        violations.append(f"P95 response time {agg.p95_ms:.1f}ms exceeds SLA {config.sla_p95_ms}ms")
     if config.sla_p99_ms is not None and agg.p99_ms > config.sla_p99_ms:
-        violations.append(
-            f"P99 response time {agg.p99_ms:.1f}ms exceeds SLA {config.sla_p99_ms}ms"
-        )
-    if (
-        config.sla_error_rate_pct is not None
-        and agg.error_rate_pct > config.sla_error_rate_pct
-    ):
+        violations.append(f"P99 response time {agg.p99_ms:.1f}ms exceeds SLA {config.sla_p99_ms}ms")
+    if config.sla_error_rate_pct is not None and agg.error_rate_pct > config.sla_error_rate_pct:
         violations.append(
             f"Error rate {agg.error_rate_pct:.2f}% exceeds SLA {config.sla_error_rate_pct}%"
         )
@@ -113,7 +106,9 @@ def _build_test_assessments(
     """Build human-readable evaluations and comments based on test results."""
     assessments: list[str] = []
     if agg.total_requests == 0:
-        assessments.append("No requests were recorded; check target availability and test configuration.")
+        assessments.append(
+            "No requests were recorded; check target availability and test configuration."
+        )
         return assessments
     if violations:
         assessments.append("SLA thresholds were exceeded; review capacity or optimization.")
@@ -126,13 +121,21 @@ def _build_test_assessments(
     else:
         assessments.append("Low success rate; prioritize failure analysis and stability fixes.")
     if config.sla_p95_ms is not None and agg.p95_ms <= config.sla_p95_ms and agg.total_requests > 0:
-        assessments.append(f"P95 latency ({agg.p95_ms:.1f} ms) is within SLA ({config.sla_p95_ms} ms).")
+        assessments.append(
+            f"P95 latency ({agg.p95_ms:.1f} ms) is within SLA ({config.sla_p95_ms} ms)."
+        )
     elif config.sla_p95_ms is not None and agg.p95_ms > config.sla_p95_ms:
-        assessments.append(f"P95 latency ({agg.p95_ms:.1f} ms) exceeds SLA ({config.sla_p95_ms} ms).")
+        assessments.append(
+            f"P95 latency ({agg.p95_ms:.1f} ms) exceeds SLA ({config.sla_p95_ms} ms)."
+        )
     if agg.error_rate_pct > 0:
-        assessments.append(f"Failed requests: {agg.failed_requests} ({agg.error_rate_pct:.2f}%). Review error messages and endpoints.")
+        assessments.append(
+            f"Failed requests: {agg.failed_requests} ({agg.error_rate_pct:.2f}%). Review error messages and endpoints."
+        )
     if agg.tps > 0:
-        assessments.append(f"Throughput: {agg.tps:.1f} TPS over {agg.total_requests} total requests.")
+        assessments.append(
+            f"Throughput: {agg.tps:.1f} TPS over {agg.total_requests} total requests."
+        )
     return assessments
 
 
@@ -177,7 +180,10 @@ def generate_report(
 
     # Status code distribution (for pie chart) - use pre-computed from aggregation
     status_code_counts = agg.status_code_counts
-    status_pie_data = [{"name": f"{k}", "value": v} for k, v in sorted(status_code_counts.items(), key=lambda x: -x[1])]
+    status_pie_data = [
+        {"name": f"{k}", "value": v}
+        for k, v in sorted(status_code_counts.items(), key=lambda x: -x[1])
+    ]
 
     # Success / Failed for donut
     success_count = agg.successful_requests
@@ -185,7 +191,11 @@ def generate_report(
     # Success / Failed for donut
     success_count = agg.successful_requests
     failed_count = agg.failed_requests
-    success_fail_donut = [{"name": "Success", "value": success_count}, {"name": "Failed", "value": failed_count}] if (success_count or failed_count) else []
+    success_fail_donut = (
+        [{"name": "Success", "value": success_count}, {"name": "Failed", "value": failed_count}]
+        if (success_count or failed_count)
+        else []
+    )
 
     # Top Errors for bar chart
     top_errors = agg.top_errors or {}
@@ -202,33 +212,39 @@ def generate_report(
     if times:
         mean_rt = sum(times) / len(times)
         variance = sum((t - mean_rt) ** 2 for t in times) / len(times)
-        std_rt_ms = round((variance ** 0.5), 2)
+        std_rt_ms = round((variance**0.5), 2)
     else:
         std_rt_ms = 0.0
 
     # SLA summary for report (report-time only)
     sla_summary: list[dict[str, Any]] = []
     if config.sla_p95_ms is not None:
-        sla_summary.append({
-            "name": "P95 Latency",
-            "target_ms": config.sla_p95_ms,
-            "actual_ms": round(agg.p95_ms, 2),
-            "met": agg.p95_ms <= config.sla_p95_ms,
-        })
+        sla_summary.append(
+            {
+                "name": "P95 Latency",
+                "target_ms": config.sla_p95_ms,
+                "actual_ms": round(agg.p95_ms, 2),
+                "met": agg.p95_ms <= config.sla_p95_ms,
+            }
+        )
     if config.sla_p99_ms is not None:
-        sla_summary.append({
-            "name": "P99 Latency",
-            "target_ms": config.sla_p99_ms,
-            "actual_ms": round(agg.p99_ms, 2),
-            "met": agg.p99_ms <= config.sla_p99_ms,
-        })
+        sla_summary.append(
+            {
+                "name": "P99 Latency",
+                "target_ms": config.sla_p99_ms,
+                "actual_ms": round(agg.p99_ms, 2),
+                "met": agg.p99_ms <= config.sla_p99_ms,
+            }
+        )
     if config.sla_error_rate_pct is not None:
-        sla_summary.append({
-            "name": "Error Rate",
-            "target_pct": config.sla_error_rate_pct,
-            "actual_pct": round(agg.error_rate_pct, 2),
-            "met": agg.error_rate_pct <= config.sla_error_rate_pct,
-        })
+        sla_summary.append(
+            {
+                "name": "Error Rate",
+                "target_pct": config.sla_error_rate_pct,
+                "actual_pct": round(agg.error_rate_pct, 2),
+                "met": agg.error_rate_pct <= config.sla_error_rate_pct,
+            }
+        )
 
     # Test configuration summary (for report card)
     test_config_summary = {
@@ -247,7 +263,11 @@ def generate_report(
     if len(time_series) >= 4:
         mid = len(time_series) // 2
         tps_first = sum(p.tps for p in time_series[:mid]) / mid if mid else 0
-        tps_second = sum(p.tps for p in time_series[mid:]) / (len(time_series) - mid) if (len(time_series) - mid) else 0
+        tps_second = (
+            sum(p.tps for p in time_series[mid:]) / (len(time_series) - mid)
+            if (len(time_series) - mid)
+            else 0
+        )
         if tps_second > tps_first * 1.1:
             trend_comment = f"TPS increased in second half (avg {tps_second:.1f} vs {tps_first:.1f} in first half); load may still be ramping."
         elif tps_second < tps_first * 0.9:
@@ -273,7 +293,11 @@ def generate_report(
         else:
             test_verdict = "Needs attention"
             test_summary = f"Success rate {agg.success_rate_pct:.1f}%, error rate {agg.error_rate_pct:.1f}%. Investigate failures."
-    test_verdict_class = "danger" if violations or agg.success_rate_pct < 80 else ("warning" if agg.success_rate_pct < 95 else "success")
+    test_verdict_class = (
+        "danger"
+        if violations or agg.success_rate_pct < 80
+        else ("warning" if agg.success_rate_pct < 95 else "success")
+    )
 
     # Executive summary narrative (high-level, non-technical for CISO/management)
     if agg.total_requests == 0:
@@ -309,26 +333,28 @@ def generate_report(
         # key is "METHOD URL"; mask URL part
         parts = key.split(" ", 1)
         display_key = f"{parts[0]} {mask_url(parts[1])}" if len(parts) == 2 else key
-        endpoint_rows.append({
-            "endpoint": display_key,
-            "total": ep_agg.total_requests,
-            "success": ep_agg.successful_requests,
-            "failed": ep_agg.failed_requests,
-            "tps": round(ep_agg.tps, 2),
-            "avg_ms": round(ep_agg.avg_response_time_ms, 2),
-            "p95_ms": round(ep_agg.p95_ms, 2),
-            "p99_ms": round(ep_agg.p99_ms, 2),
-            "error_pct": round(ep_agg.error_rate_pct, 2),
-        })
+        endpoint_rows.append(
+            {
+                "endpoint": display_key,
+                "total": ep_agg.total_requests,
+                "success": ep_agg.successful_requests,
+                "failed": ep_agg.failed_requests,
+                "tps": round(ep_agg.tps, 2),
+                "avg_ms": round(ep_agg.avg_response_time_ms, 2),
+                "p95_ms": round(ep_agg.p95_ms, 2),
+                "p99_ms": round(ep_agg.p99_ms, 2),
+                "error_pct": round(ep_agg.error_rate_pct, 2),
+            }
+        )
 
     # Method distribution (GET, POST, etc.) and status distribution (200, 404, ...)
     from collections import defaultdict
+
     method_counts: dict[str, int] = defaultdict(int)
     for r in collector.results:
         method_counts[r.method or "?"] += 1
     method_distribution = [
-        {"method": m, "count": c}
-        for m, c in sorted(method_counts.items(), key=lambda x: -x[1])
+        {"method": m, "count": c} for m, c in sorted(method_counts.items(), key=lambda x: -x[1])
     ]
     status_distribution = [
         {"status": k, "count": v}
@@ -450,7 +476,9 @@ def generate_junit_report(
     agg = collector.full_aggregate()
     violations = collector.sla_violations(config)
     scenario_display = scenario_label if scenario_label else getattr(config, "scenario", None)
-    scenario_str = scenario_display.value if hasattr(scenario_display, "value") else str(scenario_display)
+    scenario_str = (
+        scenario_display.value if hasattr(scenario_display, "value") else str(scenario_display)
+    )
 
     testsuite = ET.Element(
         "testsuite",
@@ -482,7 +510,9 @@ def generate_junit_report(
     tree = ET.ElementTree(ET.Element("testsuites"))
     root = tree.getroot()
     root.append(testsuite)
-    xml_str = minidom.parseString(ET.tostring(root, encoding="unicode", method="xml")).toprettyxml(indent="  ")
+    xml_str = minidom.parseString(ET.tostring(root, encoding="unicode", method="xml")).toprettyxml(
+        indent="  "
+    )
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(xml_str, encoding="utf-8")
@@ -501,7 +531,9 @@ def generate_json_report(
     agg = collector.full_aggregate()
     violations = collector.sla_violations(config)
     scenario_display = scenario_label if scenario_label else getattr(config, "scenario", None)
-    scenario_str = scenario_display.value if hasattr(scenario_display, "value") else str(scenario_display)
+    scenario_str = (
+        scenario_display.value if hasattr(scenario_display, "value") else str(scenario_display)
+    )
 
     payload: dict[str, Any] = {
         "collection_name": collection_name,

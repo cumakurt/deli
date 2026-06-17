@@ -33,7 +33,9 @@ def _configure_deli_logging() -> None:
     else:
         handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+            logging.Formatter(
+                "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+            )
         )
     root.addHandler(handler)
 
@@ -43,6 +45,7 @@ class _JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         import json
+
         obj: dict[str, Any] = {
             "timestamp": self.formatTime(record, self.datefmt or "%Y-%m-%dT%H:%M:%S"),
             "level": record.levelname,

@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch, AsyncMock
-
-import pytest
-
 from deli.models import (
     RequestResult,
     StressConfig,
@@ -13,18 +9,27 @@ from deli.models import (
     StressScenario,
 )
 from deli.stress_runner import (
-    _timeout_count,
-    _phase_metrics,
     _detect_nonlinear_latency,
     _first_error_users,
+    _phase_metrics,
+    _timeout_count,
     run_phase,
 )
 
 
-def _result(success: bool, error: str | None = None, status_code: int | None = 200) -> RequestResult:
+def _result(
+    success: bool, error: str | None = None, status_code: int | None = 200
+) -> RequestResult:
     return RequestResult(
-        request_name="R", folder_path="", method="GET", url="https://x.com",
-        status_code=status_code, response_time_ms=10, success=success, error=error, timestamp=0,
+        request_name="R",
+        folder_path="",
+        method="GET",
+        url="https://x.com",
+        status_code=status_code,
+        response_time_ms=10,
+        success=success,
+        error=error,
+        timestamp=0,
     )
 
 
@@ -85,10 +90,22 @@ def test_phase_metrics_exceed_p95() -> None:
 
 def _phase(users: int, p95_ms: float) -> StressPhaseResult:
     return StressPhaseResult(
-        phase=0, users=users, duration_seconds=30, total_requests=10,
-        successful_requests=10, failed_requests=0, tps=1, avg_response_time_ms=p95_ms,
-        p50_ms=p95_ms, p95_ms=p95_ms, p99_ms=p95_ms, error_rate_pct=0,
-        timeout_count=0, timeout_rate_pct=0, threshold_exceeded=False, exceeded_reason="",
+        phase=0,
+        users=users,
+        duration_seconds=30,
+        total_requests=10,
+        successful_requests=10,
+        failed_requests=0,
+        tps=1,
+        avg_response_time_ms=p95_ms,
+        p50_ms=p95_ms,
+        p95_ms=p95_ms,
+        p99_ms=p95_ms,
+        error_rate_pct=0,
+        timeout_count=0,
+        timeout_rate_pct=0,
+        threshold_exceeded=False,
+        exceeded_reason="",
     )
 
 
@@ -105,18 +122,40 @@ def test_detect_nonlinear_latency_jump() -> None:
 def test_first_error_users_none() -> None:
     phases = [
         StressPhaseResult(
-            phase=0, users=5, duration_seconds=30, total_requests=100,
-            successful_requests=100, failed_requests=0, tps=10,
-            avg_response_time_ms=10, p50_ms=10, p95_ms=10, p99_ms=10,
-            error_rate_pct=0, timeout_count=0, timeout_rate_pct=0,
-            threshold_exceeded=False, exceeded_reason="",
+            phase=0,
+            users=5,
+            duration_seconds=30,
+            total_requests=100,
+            successful_requests=100,
+            failed_requests=0,
+            tps=10,
+            avg_response_time_ms=10,
+            p50_ms=10,
+            p95_ms=10,
+            p99_ms=10,
+            error_rate_pct=0,
+            timeout_count=0,
+            timeout_rate_pct=0,
+            threshold_exceeded=False,
+            exceeded_reason="",
         ),
         StressPhaseResult(
-            phase=1, users=10, duration_seconds=30, total_requests=100,
-            successful_requests=100, failed_requests=0, tps=10,
-            avg_response_time_ms=10, p50_ms=10, p95_ms=10, p99_ms=10,
-            error_rate_pct=0, timeout_count=0, timeout_rate_pct=0,
-            threshold_exceeded=False, exceeded_reason="",
+            phase=1,
+            users=10,
+            duration_seconds=30,
+            total_requests=100,
+            successful_requests=100,
+            failed_requests=0,
+            tps=10,
+            avg_response_time_ms=10,
+            p50_ms=10,
+            p95_ms=10,
+            p99_ms=10,
+            error_rate_pct=0,
+            timeout_count=0,
+            timeout_rate_pct=0,
+            threshold_exceeded=False,
+            exceeded_reason="",
         ),
     ]
     assert _first_error_users(phases) == 0
@@ -125,18 +164,40 @@ def test_first_error_users_none() -> None:
 def test_first_error_users_found() -> None:
     phases = [
         StressPhaseResult(
-            phase=0, users=5, duration_seconds=30, total_requests=100,
-            successful_requests=100, failed_requests=0, tps=10,
-            avg_response_time_ms=10, p50_ms=10, p95_ms=10, p99_ms=10,
-            error_rate_pct=0, timeout_count=0, timeout_rate_pct=0,
-            threshold_exceeded=False, exceeded_reason="",
+            phase=0,
+            users=5,
+            duration_seconds=30,
+            total_requests=100,
+            successful_requests=100,
+            failed_requests=0,
+            tps=10,
+            avg_response_time_ms=10,
+            p50_ms=10,
+            p95_ms=10,
+            p99_ms=10,
+            error_rate_pct=0,
+            timeout_count=0,
+            timeout_rate_pct=0,
+            threshold_exceeded=False,
+            exceeded_reason="",
         ),
         StressPhaseResult(
-            phase=1, users=10, duration_seconds=30, total_requests=100,
-            successful_requests=95, failed_requests=5, tps=10,
-            avg_response_time_ms=10, p50_ms=10, p95_ms=10, p99_ms=10,
-            error_rate_pct=5, timeout_count=0, timeout_rate_pct=0,
-            threshold_exceeded=False, exceeded_reason="",
+            phase=1,
+            users=10,
+            duration_seconds=30,
+            total_requests=100,
+            successful_requests=95,
+            failed_requests=5,
+            tps=10,
+            avg_response_time_ms=10,
+            p50_ms=10,
+            p95_ms=10,
+            p99_ms=10,
+            error_rate_pct=5,
+            timeout_count=0,
+            timeout_rate_pct=0,
+            threshold_exceeded=False,
+            exceeded_reason="",
         ),
     ]
     assert _first_error_users(phases) == 10
@@ -145,9 +206,10 @@ def test_first_error_users_found() -> None:
 def test_run_phase_empty_requests() -> None:
     """run_phase with no requests returns immediately."""
     import asyncio
-    from deli.models import ParsedRequest
+
     async def _run():
         return await run_phase(0, 1.0, [], 0)
+
     results_list, start_ts, end_ts = asyncio.run(_run())
     assert start_ts <= end_ts
     assert results_list == []

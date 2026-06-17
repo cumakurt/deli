@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
-
-import pytest
 
 from deli.metrics import MetricsCollector
 from deli.models import LoadScenario, RequestResult, RunConfig
 from deli.report import (
-    mask_error_message,
-    mask_url,
     generate_json_report,
     generate_junit_report,
+    mask_error_message,
+    mask_url,
 )
 
 
@@ -106,8 +103,10 @@ def test_generate_report_full_html(tmp_path: Path) -> None:
     """generate_report produces valid HTML with key sections."""
     c, config = _make_collector_with_results()
     out = tmp_path / "report.html"
-    from deli.report import generate_report
     from datetime import datetime, timezone
+
+    from deli.report import generate_report
+
     start_dt = datetime.now(timezone.utc)
     end_dt = datetime.now(timezone.utc)
     generate_report(out, c, config, collection_name="Test", start_dt=start_dt, end_dt=end_dt)

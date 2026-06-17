@@ -8,7 +8,7 @@ from typing import Any
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from .models import StressConfig, StressPhaseResult, StressTestResult
+from .models import StressConfig, StressTestResult
 from .report import _get_echarts_script
 
 

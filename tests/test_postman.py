@@ -8,12 +8,15 @@ import pytest
 
 from deli.exceptions import DeliCollectionError
 from deli.postman import (
+    _build_url_from_object,
+    _parse_body,
+    _parse_headers,
+    _url_host,
     load_collection,
+    load_environment,
     resolve_vars,
     set_env_from_dict,
-    _url_host,
-    _parse_headers,
-    _parse_body,
+    unresolved_variables_in_requests,
 )
 
 
@@ -39,6 +42,8 @@ def test_load_collection_valid(sample_postman_collection_path: Path) -> None:
     assert requests[0].name == "Get"
     assert requests[0].method == "GET"
     assert "httpbin.org" in requests[0].url
+    assert requests[0].headers["User-Agent"].startswith("PostmanRuntime/")
+    assert requests[0].headers["Accept"] == "*/*"
 
 
 def test_load_collection_with_env_override(sample_postman_collection_path: Path) -> None:
@@ -50,6 +55,99 @@ def test_load_collection_with_env_override(sample_postman_collection_path: Path)
     assert len(requests) == 1
     # URL in collection is literal https://httpbin.org/get so no {{base}} to replace
     assert requests[0].url == "https://httpbin.org/get"
+
+
+def test_load_collection_with_environment_file(tmp_path: Path) -> None:
+    collection = tmp_path / "collection.json"
+    collection.write_text(
+        """{
+          "info": {"name": "T", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+          "item": [{
+            "name": "Env Request",
+            "request": {
+              "method": "POST",
+              "url": "{{base_url}}/users/{{user_id}}",
+              "header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+              "body": {"mode": "raw", "raw": "{\\"name\\": \\"{{name}}\\"}"}
+            }
+          }]
+        }""",
+        encoding="utf-8",
+    )
+    environment = tmp_path / "environment.json"
+    environment.write_text(
+        """{
+          "name": "Test Env",
+          "values": [
+            {"key": "base_url", "value": "https://api.example.com", "enabled": true},
+            {"key": "user_id", "value": "42", "enabled": true},
+            {"key": "token", "value": "secret", "enabled": true},
+            {"key": "name", "value": "alice", "enabled": true},
+            {"key": "disabled", "value": "skip", "enabled": false}
+          ]
+        }""",
+        encoding="utf-8",
+    )
+
+    requests = load_collection(collection, environment_path=environment)
+
+    assert len(requests) == 1
+    assert requests[0].url == "https://api.example.com/users/42"
+    assert requests[0].headers["Authorization"] == "Bearer secret"
+    assert requests[0].body == '{"name": "alice"}'
+
+
+def test_load_collection_env_override_wins_over_environment_file(tmp_path: Path) -> None:
+    collection = tmp_path / "collection.json"
+    collection.write_text(
+        """{
+          "info": {"name": "T", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+          "item": [{"name": "Get", "request": {"method": "GET", "url": "{{base_url}}/ping"}}]
+        }""",
+        encoding="utf-8",
+    )
+    environment = tmp_path / "environment.json"
+    environment.write_text(
+        """{"values": [{"key": "base_url", "value": "https://file.example.com", "enabled": true}]}""",
+        encoding="utf-8",
+    )
+
+    requests = load_collection(
+        collection,
+        environment_path=environment,
+        env_override={"base_url": "https://override.example.com"},
+    )
+
+    assert requests[0].url == "https://override.example.com/ping"
+
+
+def test_load_environment_file_not_found() -> None:
+    with pytest.raises(DeliCollectionError, match="Environment file not found"):
+        load_environment("/nonexistent/environment.json")
+
+
+def test_unresolved_variables_in_requests(tmp_path: Path) -> None:
+    collection = tmp_path / "collection.json"
+    collection.write_text(
+        """{
+          "info": {"name": "T", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+          "item": [{
+            "name": "Needs Env",
+            "request": {
+              "method": "GET",
+              "url": "{{base_url}}/ping",
+              "header": [{"key": "Authorization", "value": "Bearer {{token}}"}]
+            }
+          }]
+        }""",
+        encoding="utf-8",
+    )
+    requests = load_collection(
+        collection,
+        env_override={"base_url": "https://api.example.com"},
+    )
+
+    assert unresolved_variables_in_requests(requests) == {"Needs Env": ["token"]}
 
 
 def test_load_collection_invalid_json(tmp_path: Path) -> None:
@@ -74,6 +172,14 @@ def test_url_host_array() -> None:
     assert _url_host({"host": ["api", "example", "com"]}) == "api.example.com"
 
 
+def test_build_url_from_object_host_variable_with_scheme() -> None:
+    url = _build_url_from_object(
+        {"protocol": "https", "host": ["{{base_url}}"], "path": ["api"]},
+        {"base_url": "https://api.example.com"},
+    )
+    assert url == "https://api.example.com/api"
+
+
 def test_parse_headers_empty() -> None:
     assert _parse_headers([], {}) == {}
 
@@ -93,12 +199,50 @@ def test_parse_body_none() -> None:
 
 
 def test_parse_body_raw_with_vars() -> None:
-    body = {"mode": "raw", "raw": "{\"user\": \"{{name}}\"}"}
-    assert _parse_body(body, {"name": "alice"}) == "{\"user\": \"alice\"}"
+    body = {"mode": "raw", "raw": '{"user": "{{name}}"}'}
+    assert _parse_body(body, {"name": "alice"}) == '{"user": "alice"}'
 
 
 def test_parse_body_non_raw() -> None:
-    assert _parse_body({"mode": "urlencoded"}, {}) is None
+    assert _parse_body({"mode": "graphql"}, {}) is None
+
+
+def test_parse_body_urlencoded_sets_content_type() -> None:
+    headers: dict[str, str] = {}
+    body = {
+        "mode": "urlencoded",
+        "urlencoded": [
+            {"key": "username", "value": "{{user}}", "type": "text"},
+            {"key": "password", "value": "secret value", "type": "text"},
+        ],
+    }
+    assert _parse_body(body, {"user": "alice@example.com"}, headers) == (
+        "username=alice%40example.com&password=secret+value"
+    )
+    assert headers["Content-Type"] == "application/x-www-form-urlencoded"
+
+
+def test_load_collection_bearer_auth_from_postman_auth(tmp_path: Path) -> None:
+    collection = tmp_path / "collection.json"
+    collection.write_text(
+        """{
+          "info": {"name": "T", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+          "item": [{
+            "name": "Authed",
+            "request": {
+              "method": "GET",
+              "url": "https://api.example.com/ping",
+              "auth": {
+                "type": "bearer",
+                "bearer": [{"key": "token", "value": "{{token}}", "type": "string"}]
+              }
+            }
+          }]
+        }""",
+        encoding="utf-8",
+    )
+    requests = load_collection(collection, env_override={"token": "abc"})
+    assert requests[0].headers["Authorization"] == "Bearer abc"
 
 
 def test_set_env_from_dict() -> None:

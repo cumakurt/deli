@@ -34,30 +34,31 @@ def _validate_run_config(c: RunConfig) -> None:
         raise DeliConfigError("sla_p95_ms must be > 0 when set")
     if c.sla_p99_ms is not None and c.sla_p99_ms <= 0:
         raise DeliConfigError("sla_p99_ms must be > 0 when set")
-    if c.sla_error_rate_pct is not None and (c.sla_error_rate_pct < 0 or c.sla_error_rate_pct > 100):
+    if c.sla_error_rate_pct is not None and (
+        c.sla_error_rate_pct < 0 or c.sla_error_rate_pct > 100
+    ):
         raise DeliConfigError("sla_error_rate_pct must be between 0 and 100 when set")
     if c.scenario == LoadScenario.SPIKE and (c.spike_users <= 0 or c.spike_duration_seconds <= 0):
-        raise DeliConfigError("spike scenario requires spike_users > 0 and spike_duration_seconds > 0")
+        raise DeliConfigError(
+            "spike scenario requires spike_users > 0 and spike_duration_seconds > 0"
+        )
 
 
 def load_config(path: str | Path) -> RunConfig:
     """Load run configuration from YAML file.
-    
+
     Args:
         path: Path to YAML configuration file
-    
+
     Returns:
         Validated RunConfig instance
-    
+
     Raises:
         DeliConfigError: If file not found, invalid YAML, or validation fails
     """
     p = Path(path)
     if not p.exists():
-        raise DeliConfigError(
-            f"Config file not found: {path}",
-            context={"path": str(path)}
-        )
+        raise DeliConfigError(f"Config file not found: {path}", context={"path": str(path)})
 
     try:
         raw = yaml.safe_load(p.read_text(encoding="utf-8"))
@@ -66,28 +67,29 @@ def load_config(path: str | Path) -> RunConfig:
         raise DeliConfigError(
             f"Invalid YAML syntax in config file: {e}",
             context={"path": str(path)},
-            original_error=e
+            original_error=e,
         ) from e
     except OSError as e:
         logger.exception("Failed to read config file")
         raise DeliConfigError(
-            f"Cannot read config file: {e}",
-            context={"path": str(path)},
-            original_error=e
+            f"Cannot read config file: {e}", context={"path": str(path)}, original_error=e
         ) from e
 
     if not isinstance(raw, dict):
         raise DeliConfigError(
             "Config must be a YAML object/dictionary",
-            context={"path": str(path), "actual_type": type(raw).__name__}
+            context={"path": str(path), "actual_type": type(raw).__name__},
         )
 
     scenario_str = (raw.get("scenario") or "constant").strip().lower()
     try:
         scenario = LoadScenario(scenario_str)
     except ValueError:
-        logger.debug("Unknown scenario '%s', defaulting to 'constant'", scenario_str)
-        scenario = LoadScenario.CONSTANT
+        allowed = ", ".join(s.value for s in LoadScenario)
+        raise DeliConfigError(
+            f"Unknown scenario: {scenario_str}",
+            context={"path": str(path), "allowed": allowed},
+        )
 
     try:
         config = RunConfig(
@@ -105,13 +107,16 @@ def load_config(path: str | Path) -> RunConfig:
         )
     except (TypeError, ValueError) as e:
         raise DeliConfigError(
-            f"Invalid config value: {e}",
-            context={"path": str(path)},
-            original_error=e
+            f"Invalid config value: {e}", context={"path": str(path)}, original_error=e
         ) from e
 
     _validate_run_config(config)
-    logger.debug("Loaded config: users=%s, duration=%s, scenario=%s", config.users, config.duration_seconds, config.scenario.value)
+    logger.debug(
+        "Loaded config: users=%s, duration=%s, scenario=%s",
+        config.users,
+        config.duration_seconds,
+        config.scenario.value,
+    )
     return config
 
 
@@ -124,7 +129,4 @@ def _optional_float(data: dict[str, Any], key: str) -> float | None:
     v = data.get(key)
     if v is None:
         return None
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
+    return float(v)

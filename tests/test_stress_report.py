@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from deli.models import StressConfig, StressPhaseResult, StressScenario, StressTestResult
 from deli.stress_report import generate_stress_report
 
@@ -23,18 +21,40 @@ def test_generate_stress_report(tmp_path: Path) -> None:
     )
     phases = [
         StressPhaseResult(
-            phase=0, users=5, duration_seconds=30, total_requests=100,
-            successful_requests=100, failed_requests=0, tps=3.33,
-            avg_response_time_ms=50, p50_ms=45, p95_ms=80, p99_ms=120,
-            error_rate_pct=0, timeout_count=0, timeout_rate_pct=0,
-            threshold_exceeded=False, exceeded_reason="",
+            phase=0,
+            users=5,
+            duration_seconds=30,
+            total_requests=100,
+            successful_requests=100,
+            failed_requests=0,
+            tps=3.33,
+            avg_response_time_ms=50,
+            p50_ms=45,
+            p95_ms=80,
+            p99_ms=120,
+            error_rate_pct=0,
+            timeout_count=0,
+            timeout_rate_pct=0,
+            threshold_exceeded=False,
+            exceeded_reason="",
         ),
         StressPhaseResult(
-            phase=1, users=10, duration_seconds=30, total_requests=200,
-            successful_requests=195, failed_requests=5, tps=6.5,
-            avg_response_time_ms=90, p50_ms=85, p95_ms=150, p99_ms=200,
-            error_rate_pct=2.5, timeout_count=2, timeout_rate_pct=1,
-            threshold_exceeded=False, exceeded_reason="",
+            phase=1,
+            users=10,
+            duration_seconds=30,
+            total_requests=200,
+            successful_requests=195,
+            failed_requests=5,
+            tps=6.5,
+            avg_response_time_ms=90,
+            p50_ms=85,
+            p95_ms=150,
+            p99_ms=200,
+            error_rate_pct=2.5,
+            timeout_count=2,
+            timeout_rate_pct=1,
+            threshold_exceeded=False,
+            exceeded_reason="",
         ),
     ]
     result = StressTestResult(
