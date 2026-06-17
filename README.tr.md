@@ -1,4 +1,4 @@
-# deli 🥪
+# deli
 
 **deli**, yüksek performanslı, hafif ve modern bir yük testi (load testing) motorudur. Hız, düşük kaynak tüketimi ve geliştirici deneyimine odaklanır.
 
