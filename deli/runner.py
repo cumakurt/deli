@@ -16,10 +16,22 @@ from rich.live import Live
 from .config import load_config
 from .dashboard import create_live_panel
 from .exceptions import DeliRunnerError
+from .jmeter import (
+    load_jmx,
+)
+from .jmeter import (
+    unresolved_variables_in_requests as unresolved_jmeter_variables_in_requests,
+)
 from .logging_config import get_logger
 from .metrics import DEFAULT_MAX_RESULTS, MetricsCollector
 from .models import AggregateMetrics, LoadScenario, ParsedRequest, RunConfig
-from .postman import load_collection, load_environment, unresolved_variables_in_requests
+from .postman import (
+    load_collection,
+    load_environment,
+    order_requests_for_runtime_dependencies,
+    produced_runtime_variables,
+    unresolved_variables_in_requests,
+)
 from .report import generate_json_report, generate_junit_report, generate_report
 from .scenarios import run_scenario
 
@@ -378,11 +390,48 @@ async def run_test(
         env_override=env_override or None,
         environment_path=environment_path,
     )
+    requests = order_requests_for_runtime_dependencies(requests)
     if not requests:
         raise DeliRunnerError("No requests found in collection")
 
     report_path_resolved = _resolve_report_path(report_path)
     collection_name = Path(collection_path).stem
+    await _run_with_requests(
+        requests=requests,
+        config=config,
+        report_path=report_path_resolved,
+        collection_name=collection_name,
+        live=live,
+        junit_path=junit_path,
+        json_path=json_path,
+    )
+
+
+async def run_jmeter_test(
+    jmeter_path: str | Path,
+    report_path: str | Path,
+    config_path: str | Path | None = None,
+    env_override: dict[str, str] | None = None,
+    live: bool = True,
+    junit_path: str | Path | None = None,
+    json_path: str | Path | None = None,
+    config_override: RunConfig | None = None,
+) -> None:
+    """Load JMeter JMX HTTP samplers and run the configured scenario."""
+    if config_override is not None:
+        config = config_override
+    elif config_path is not None:
+        config = load_config(config_path)
+    else:
+        raise DeliRunnerError(
+            "Either config path (-f) or config overrides (--users, --duration, etc.) required"
+        )
+    requests = load_jmx(jmeter_path, env_override=env_override or None)
+    if not requests:
+        raise DeliRunnerError("No HTTP samplers found in JMeter JMX file")
+
+    report_path_resolved = _resolve_report_path(report_path)
+    collection_name = Path(jmeter_path).stem
     await _run_with_requests(
         requests=requests,
         config=config,
@@ -462,6 +511,7 @@ def _load_requests_for_test_mode(
             env_override=None if env_values is not None else env_override,
             environment_values=env_values,
         )
+        requests = order_requests_for_runtime_dependencies(requests)
     except Exception as exc:
         raise DeliRunnerError(f"Collection file could not be loaded: {exc}") from exc
 
@@ -469,7 +519,10 @@ def _load_requests_for_test_mode(
     if not requests:
         raise DeliRunnerError("No requests found in collection")
 
-    unresolved = unresolved_variables_in_requests(requests)
+    unresolved = unresolved_variables_in_requests(
+        requests,
+        ignore_variables=produced_runtime_variables(requests),
+    )
     if unresolved:
         _print_unresolved_variables(console, unresolved)
         message = "Some Postman variables could not be resolved"
@@ -505,6 +558,83 @@ async def run_postman_test_mode(
         config=_test_mode_config(),
         report_path=_resolve_report_path(report_path),
         collection_name=f"{Path(collection_path).stem} test",
+        live=live,
+        junit_path=junit_path,
+        json_path=json_path,
+        http2=False,
+    )
+    if agg.total_requests == 0:
+        raise DeliRunnerError("Test mode did not record any requests")
+    if agg.failed_requests > 0:
+        status_summary = ", ".join(
+            f"{status}={count}" for status, count in sorted(agg.status_code_counts.items())
+        )
+        console.print(
+            f"[red]HTTP verification failed[/red]: {agg.failed_requests}/{agg.total_requests} "
+            f"request(s) failed ({status_summary})"
+        )
+        raise DeliRunnerError(
+            f"Test mode failed: {agg.failed_requests}/{agg.total_requests} requests failed"
+            + (f" ({status_summary})" if status_summary else "")
+        )
+    console.print(
+        f"[green]HTTP verification OK[/green]: {agg.total_requests} request(s), "
+        f"error_rate={agg.error_rate_pct:.2f}%"
+    )
+    return agg
+
+
+def _load_jmeter_requests_for_test_mode(
+    jmeter_path: str | Path,
+    env_override: dict[str, str] | None,
+    console: Console,
+) -> list[ParsedRequest]:
+    console.print("[bold]JMeter preflight[/bold]")
+    console.print(f"JMX: {jmeter_path}")
+
+    try:
+        requests = load_jmx(jmeter_path, env_override=env_override or None)
+    except Exception as exc:
+        raise DeliRunnerError(f"JMeter JMX file could not be loaded: {exc}") from exc
+
+    console.print(f"[green]JMX OK[/green]: {len(requests)} HTTP sampler(s)")
+    if not requests:
+        raise DeliRunnerError("No HTTP samplers found in JMeter JMX file")
+
+    unresolved = unresolved_jmeter_variables_in_requests(requests)
+    if unresolved:
+        _print_unresolved_variables(console, unresolved)
+        message = "Some JMeter variables could not be resolved"
+        if not _confirm_continue_after_preflight_issue(message):
+            raise DeliRunnerError(f"Unresolved JMeter variables: {unresolved}")
+    else:
+        console.print("[green]Variables OK[/green]: all JMeter variables resolved")
+
+    console.print("[cyan]HTTP verification[/cyan]: 5 users, 1 iteration per user")
+    return requests
+
+
+async def run_jmeter_test_mode(
+    jmeter_path: str | Path,
+    report_path: str | Path,
+    env_override: dict[str, str] | None = None,
+    live: bool = True,
+    junit_path: str | Path | None = None,
+    json_path: str | Path | None = None,
+) -> AggregateMetrics:
+    """Read JMeter JMX and verify targets with a 5-user one-iteration run."""
+    console = Console()
+    requests = _load_jmeter_requests_for_test_mode(
+        jmeter_path=jmeter_path,
+        env_override=env_override or None,
+        console=console,
+    )
+
+    agg = await _run_with_requests(
+        requests=requests,
+        config=_test_mode_config(),
+        report_path=_resolve_report_path(report_path),
+        collection_name=f"{Path(jmeter_path).stem} test",
         live=live,
         junit_path=junit_path,
         json_path=json_path,

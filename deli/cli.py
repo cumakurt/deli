@@ -18,11 +18,18 @@ from typing import Any, Coroutine
 from . import __version__
 from .config import load_config, validate_run_config
 from .exceptions import DeliCollectionError, DeliConfigError, DeliError, DeliRunnerError
+from .jmeter import load_jmx_run_config
 from .logging_config import get_logger
 from .manual import build_manual_requests, manual_report_name
 from .models import LoadScenario, RunConfig
-from .postman import load_collection
-from .runner import run_manual_test, run_postman_test_mode, run_test
+from .postman import load_collection, order_requests_for_runtime_dependencies
+from .runner import (
+    run_jmeter_test,
+    run_jmeter_test_mode,
+    run_manual_test,
+    run_postman_test_mode,
+    run_test,
+)
 from .stress_config import load_stress_config
 from .stress_runner import run_stress_test
 
@@ -72,6 +79,41 @@ def _parse_env_args(env_list: list[str] | None) -> dict[str, str]:
             k, _, v = s.partition("=")
             out[k.strip()] = v.strip()
     return out
+
+
+def _looks_like_environment_file_arg(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped or "=" in stripped:
+        return False
+    return Path(stripped).suffix.lower() == ".json"
+
+
+def _normalize_environment_args(
+    env_list: list[str] | None,
+    environment_path: Path | None,
+) -> tuple[list[str] | None, Path | None]:
+    """Accept legacy `-e environment.json` while preserving `-e KEY=VALUE` overrides."""
+    if not env_list:
+        return env_list, environment_path
+
+    env_args: list[str] = []
+    environment_files: list[Path] = []
+    for value in env_list:
+        if _looks_like_environment_file_arg(value):
+            environment_files.append(Path(value.strip()))
+        else:
+            env_args.append(value)
+
+    if len(environment_files) > 1:
+        raise ValueError("Only one environment file can be provided with -e")
+
+    if environment_files:
+        inferred_path = environment_files[0]
+        if environment_path is not None and environment_path != inferred_path:
+            raise ValueError("Use only one environment file: -E/--environment or -e PATH")
+        environment_path = inferred_path
+
+    return env_args, environment_path
 
 
 # Defaults when running without -f (config file)
@@ -152,6 +194,39 @@ def _build_config_with_overrides(config_path: Path, args: argparse.Namespace) ->
     return merged
 
 
+def _build_jmeter_config_with_overrides(
+    jmeter_path: Path,
+    args: argparse.Namespace,
+    env_override: dict[str, str] | None,
+) -> RunConfig:
+    """Load ThreadGroup settings from JMX and apply CLI load overrides."""
+    base = load_jmx_run_config(jmeter_path, env_override=env_override)
+    scenario = base.scenario
+    if args.scenario is not None:
+        scenario = LoadScenario(args.scenario)
+    merged = RunConfig(
+        users=args.users if args.users is not None else base.users,
+        ramp_up_seconds=args.ramp_up if args.ramp_up is not None else base.ramp_up_seconds,
+        duration_seconds=args.duration if args.duration is not None else base.duration_seconds,
+        iterations=args.iterations if args.iterations is not None else base.iterations,
+        think_time_ms=args.think_time_ms if args.think_time_ms is not None else base.think_time_ms,
+        scenario=scenario,
+        spike_users=args.spike_users if args.spike_users is not None else base.spike_users,
+        spike_duration_seconds=(
+            args.spike_duration if args.spike_duration is not None else base.spike_duration_seconds
+        ),
+        sla_p95_ms=args.sla_p95_ms if args.sla_p95_ms is not None else base.sla_p95_ms,
+        sla_p99_ms=args.sla_p99_ms if args.sla_p99_ms is not None else base.sla_p99_ms,
+        sla_error_rate_pct=(
+            args.sla_error_rate_pct
+            if args.sla_error_rate_pct is not None
+            else base.sla_error_rate_pct
+        ),
+    )
+    validate_run_config(merged)
+    return merged
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="deli",
@@ -161,7 +236,14 @@ def main() -> int:
     parser.add_argument(
         "-c",
         "--collection",
-        help="Path to Postman Collection v2.1 JSON file (required when not using -m)",
+        help="Path to Postman Collection v2.1 JSON file (target mode; mutually exclusive with -j/-m)",
+    )
+    parser.add_argument(
+        "-j",
+        "--jmeter",
+        dest="jmeter_path",
+        metavar="PATH",
+        help="Path to Apache JMeter JMX file (target mode; mutually exclusive with -c/-m)",
     )
     parser.add_argument(
         "-f",
@@ -191,8 +273,9 @@ def main() -> int:
         "-e",
         "--env",
         action="append",
-        metavar="KEY=VALUE",
-        help="Environment variable for collection (can be repeated). Overrides file env. Only with -c.",
+        metavar="KEY=VALUE|PATH",
+        help="Environment variable override for collection (KEY=VALUE; can be repeated). "
+        "A JSON path is treated as --environment PATH for compatibility. Only with -c.",
     )
     parser.add_argument(
         "-E",
@@ -207,7 +290,7 @@ def main() -> int:
         "--manual-url",
         metavar="URL",
         dest="manual_url",
-        help="Manual target URL: load test this URL only (no Postman). Use with -f and -o.",
+        help="Manual target URL: load test this URL only (target mode; mutually exclusive with -c/-j).",
     )
     parser.add_argument(
         "-s",
@@ -317,6 +400,12 @@ def main() -> int:
 
     config_path = Path(args.config) if args.config else None
     environment_path = Path(args.environment_path) if args.environment_path else None
+    try:
+        env_args, environment_path = _normalize_environment_args(args.env, environment_path)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    args.env = env_args
     output_path = args.output or (
         DEFAULT_TEST_REPORT
         if args.test_mode
@@ -324,6 +413,11 @@ def main() -> int:
         if args.stress
         else DEFAULT_LOAD_REPORT
     )
+
+    target_count = sum(bool(v) for v in (args.collection, args.jmeter_path, args.manual_url))
+    if target_count > 1:
+        print("Error: use only one target: -c/--collection, -j/--jmeter, or -m/--manual-url", file=sys.stderr)
+        return 1
 
     if environment_path is not None and not args.collection:
         print("Error: --environment requires -c/--collection", file=sys.stderr)
@@ -345,22 +439,34 @@ def main() -> int:
         return 1
 
     if args.test_mode:
-        if not args.collection:
-            print("Error: --test-mode requires -c/--collection", file=sys.stderr)
+        if not args.collection and not args.jmeter_path:
+            print("Error: --test-mode requires -c/--collection or -j/--jmeter", file=sys.stderr)
             return 1
         try:
             env_override = _parse_env_args(args.env)
-            _run_async(
-                run_postman_test_mode(
-                    collection_path=Path(args.collection),
-                    report_path=output_path,
-                    env_override=env_override or None,
-                    environment_path=environment_path,
-                    live=not args.no_live,
-                    junit_path=getattr(args, "junit_path", None),
-                    json_path=getattr(args, "json_path", None),
+            if args.jmeter_path:
+                _run_async(
+                    run_jmeter_test_mode(
+                        jmeter_path=Path(args.jmeter_path),
+                        report_path=output_path,
+                        env_override=env_override or None,
+                        live=not args.no_live,
+                        junit_path=getattr(args, "junit_path", None),
+                        json_path=getattr(args, "json_path", None),
+                    )
                 )
-            )
+            else:
+                _run_async(
+                    run_postman_test_mode(
+                        collection_path=Path(args.collection),
+                        report_path=output_path,
+                        env_override=env_override or None,
+                        environment_path=environment_path,
+                        live=not args.no_live,
+                        junit_path=getattr(args, "junit_path", None),
+                        json_path=getattr(args, "json_path", None),
+                    )
+                )
         except KeyboardInterrupt:
             print("\nInterrupted.", file=sys.stderr)
             return 130
@@ -394,12 +500,23 @@ def main() -> int:
                     env_override=env_override or None,
                     environment_path=environment_path,
                 )
+                requests = order_requests_for_runtime_dependencies(requests)
             except DeliCollectionError as e:
                 return handle_error(e)
             collection_name = collection.stem
+        elif args.jmeter_path:
+            jmeter_path = Path(args.jmeter_path)
+            try:
+                from .jmeter import load_jmx
+
+                env_override = _parse_env_args(args.env)
+                requests = load_jmx(jmeter_path, env_override=env_override or None)
+            except DeliCollectionError as e:
+                return handle_error(e)
+            collection_name = jmeter_path.stem
         else:
             print(
-                "Error: stress mode requires -c/--collection or -m/--manual-url for target",
+                "Error: stress mode requires -c/--collection, -j/--jmeter, or -m/--manual-url for target",
                 file=sys.stderr,
             )
             return 1
@@ -455,30 +572,49 @@ def main() -> int:
             return handle_error(e)
         return 0
 
-    # Postman mode: -c required
-    if not args.collection:
-        print("Error: -c/--collection required when not using -m/--manual-url", file=sys.stderr)
+    # File target mode: Postman (-c) or JMeter (-j) required when not using -m.
+    if not args.collection and not args.jmeter_path:
+        print("Error: -c/--collection or -j/--jmeter required when not using -m/--manual-url", file=sys.stderr)
         return 1
-    collection = Path(args.collection)
     try:
         if config_path is None:
             config_override = _build_config_from_args(args)
         else:
             config_override = _build_config_with_overrides(config_path, args)
         env_override = _parse_env_args(args.env)
-        _run_async(
-            run_test(
-                collection_path=collection,
-                report_path=output_path,
-                config_path=config_path,
-                env_override=env_override or None,
-                environment_path=environment_path,
-                live=not args.no_live,
-                junit_path=getattr(args, "junit_path", None),
-                json_path=getattr(args, "json_path", None),
-                config_override=config_override,
+        if args.jmeter_path:
+            if config_path is None:
+                config_override = _build_jmeter_config_with_overrides(
+                    Path(args.jmeter_path),
+                    args,
+                    env_override or None,
+                )
+            _run_async(
+                run_jmeter_test(
+                    jmeter_path=Path(args.jmeter_path),
+                    report_path=output_path,
+                    config_path=config_path,
+                    env_override=env_override or None,
+                    live=not args.no_live,
+                    junit_path=getattr(args, "junit_path", None),
+                    json_path=getattr(args, "json_path", None),
+                    config_override=config_override,
+                )
             )
-        )
+        else:
+            _run_async(
+                run_test(
+                    collection_path=Path(args.collection),
+                    report_path=output_path,
+                    config_path=config_path,
+                    env_override=env_override or None,
+                    environment_path=environment_path,
+                    live=not args.no_live,
+                    junit_path=getattr(args, "junit_path", None),
+                    json_path=getattr(args, "json_path", None),
+                    config_override=config_override,
+                )
+            )
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         return 130

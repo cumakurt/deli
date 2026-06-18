@@ -12,8 +12,13 @@ from deli.postman import (
     _parse_body,
     _parse_headers,
     _url_host,
+    apply_post_response_assignments,
+    build_runtime_env,
     load_collection,
     load_environment,
+    order_requests_for_runtime_dependencies,
+    produced_runtime_variables,
+    render_runtime_request,
     resolve_vars,
     set_env_from_dict,
     unresolved_variables_in_requests,
@@ -276,3 +281,77 @@ def test_load_collection_url_object_and_raw_body(tmp_path: Path) -> None:
     assert requests[0].url == "https://httpbin.org/post"
     assert "hello" in (requests[0].body or "")
     assert requests[0].headers.get("Content-Type") == "application/json"
+
+
+def test_load_collection_parses_postman_environment_set_script(tmp_path: Path) -> None:
+    collection = tmp_path / "collection.json"
+    collection.write_text(
+        """{
+          "info": {"name": "T", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+          "item": [{
+            "name": "Get Token",
+            "event": [{
+              "listen": "test",
+              "script": {"exec": [
+                "var jsonData = pm.response.json();",
+                "pm.environment.set(\\"access_token\\", jsonData.access_token);"
+              ]}
+            }],
+            "request": {"method": "POST", "url": "https://api.example.com/token"}
+          }]
+        }""",
+        encoding="utf-8",
+    )
+
+    requests = load_collection(collection)
+
+    assert len(requests[0].post_response_assignments) == 1
+    assert requests[0].post_response_assignments[0].variable == "access_token"
+    assert requests[0].post_response_assignments[0].expression == "jsonData.access_token"
+
+
+def test_runtime_assignment_updates_rendered_request(tmp_path: Path) -> None:
+    collection = tmp_path / "collection.json"
+    collection.write_text(
+        """{
+          "info": {"name": "T", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+          "item": [
+            {
+              "name": "Use Token",
+              "request": {
+                "method": "GET",
+                "url": "https://api.example.com/users/me",
+                "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}]
+              }
+            },
+            {
+              "name": "Get Token",
+              "event": [{
+                "listen": "test",
+                "script": {"exec": ["pm.environment.set(\\"access_token\\", jsonData.access_token);"]}
+              }],
+              "request": {"method": "POST", "url": "https://api.example.com/token"}
+            }
+          ]
+        }""",
+        encoding="utf-8",
+    )
+
+    requests = order_requests_for_runtime_dependencies(load_collection(collection))
+    runtime_env = build_runtime_env(requests)
+    assert runtime_env is not None
+    assert [r.name for r in requests] == ["Get Token", "Use Token"]
+
+    apply_post_response_assignments(
+        requests[0],
+        '{"access_token":"fresh-token"}',
+        runtime_env,
+    )
+    _, headers, _ = render_runtime_request(requests[1], runtime_env)
+
+    assert headers["Authorization"] == "Bearer fresh-token"
+    assert produced_runtime_variables(requests) == {"access_token"}
+    assert unresolved_variables_in_requests(
+        requests,
+        ignore_variables=produced_runtime_variables(requests),
+    ) == {}

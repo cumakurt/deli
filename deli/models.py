@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class LoadScenario(str, Enum):
@@ -18,6 +19,14 @@ class LoadScenario(str, Enum):
     GRADUAL = "gradual"  # Ramp-up then sustain
     CONSTANT = "constant"  # Fixed concurrent users
     SPIKE = "spike"  # Sudden spike then drop
+
+
+@dataclass(frozen=True, slots=True)
+class PostResponseAssignment:
+    """A supported Postman test-script environment assignment."""
+
+    variable: str
+    expression: str
 
 
 class ParsedRequest:
@@ -34,6 +43,11 @@ class ParsedRequest:
         "headers",
         "body",
         "folder_path",
+        "url_template",
+        "header_templates",
+        "body_spec",
+        "base_env",
+        "post_response_assignments",
         "_prepared_headers",
         "_body_bytes",
     )
@@ -46,6 +60,11 @@ class ParsedRequest:
         headers: dict[str, str] | None = None,
         body: str | None = None,
         folder_path: str = "",
+        url_template: str | None = None,
+        header_templates: dict[str, str] | None = None,
+        body_spec: Any = None,
+        base_env: dict[str, str] | None = None,
+        post_response_assignments: list[PostResponseAssignment] | None = None,
     ) -> None:
         self.name = name
         self.method = method
@@ -53,6 +72,13 @@ class ParsedRequest:
         self.headers = headers if headers is not None else {}
         self.body = body
         self.folder_path = folder_path
+        self.url_template = url_template if url_template is not None else url
+        self.header_templates = (
+            header_templates if header_templates is not None else dict(self.headers)
+        )
+        self.body_spec = body_spec
+        self.base_env = base_env
+        self.post_response_assignments = post_response_assignments or []
         self._prepared_headers: dict[str, str] | None = None
         self._body_bytes: bytes | None = None
 

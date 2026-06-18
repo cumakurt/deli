@@ -11,7 +11,7 @@ from deli.engine import (
     execute_request,
     run_worker,
 )
-from deli.models import ParsedRequest, RequestResult
+from deli.models import ParsedRequest, PostResponseAssignment, RequestResult
 
 
 def test_get_prepared_headers_adds_content_type_when_body() -> None:
@@ -88,6 +88,29 @@ def test_execute_request_network_error() -> None:
     assert result.success is False
     assert result.status_code is None
     assert result.error == "failed"
+
+
+def test_execute_request_applies_post_response_runtime_assignments() -> None:
+    req = ParsedRequest(
+        name="Get Token",
+        method="POST",
+        url="https://example.com/token",
+        base_env={},
+        post_response_assignments=[
+            PostResponseAssignment("access_token", "jsonData.access_token")
+        ],
+    )
+    runtime_env: dict[str, str] = {}
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = '{"access_token":"fresh-token"}'
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(return_value=mock_response)
+
+    result = asyncio.run(execute_request(mock_client, req, 0, runtime_env))
+
+    assert result.success is True
+    assert runtime_env["access_token"] == "fresh-token"
 
 
 def test_execute_request_think_time() -> None:

@@ -11,12 +11,15 @@ import orjson
 
 from .exceptions import DeliCollectionError
 from .logging_config import get_logger
-from .models import ParsedRequest
+from .models import ParsedRequest, PostResponseAssignment
 
 logger = get_logger("postman")
 
 # Postman v2.1 variable syntax: {{variableName}}
 VAR_PATTERN = re.compile(r"\{\{([^}]+)\}\}")
+PM_ENV_SET_PATTERN = re.compile(
+    r"pm\.environment\.set\(\s*(['\"])(?P<key>.*?)\1\s*,\s*(?P<expr>.*)\)\s*;?\s*$"
+)
 DEFAULT_POSTMAN_HEADERS = {
     "User-Agent": "PostmanRuntime/7.43.0",
     "Accept": "*/*",
@@ -151,21 +154,29 @@ def _parse_request_item(
 
     url_raw = req.get("url")
     if isinstance(url_raw, str):
-        url = resolve_vars(url_raw, env)
+        url_template = url_raw
+        url = resolve_vars(url_template, env)
     elif isinstance(url_raw, dict):
         raw = url_raw.get("raw")
         if isinstance(raw, str) and raw.strip():
-            url = resolve_vars(raw, env)
+            url_template = raw
+            url = resolve_vars(url_template, env)
         else:
-            url = _build_url_from_object(url_raw, env)
+            url_template = _build_url_from_object(url_raw, {})
+            url = resolve_vars(url_template, env)
     else:
         return None
 
+    header_templates = _parse_headers(req.get("header") or [], {})
+    _apply_default_postman_headers(header_templates)
+    header_templates.update(_parse_auth_headers(req.get("auth"), {}, header_templates))
     headers = _parse_headers(req.get("header") or [], env)
     _apply_default_postman_headers(headers)
     headers.update(_parse_auth_headers(req.get("auth"), env, headers))
     method = (req.get("method") or "GET").strip().upper()
-    body = _parse_body(req.get("body"), env, headers)
+    body_spec = req.get("body")
+    body = _parse_body(body_spec, env, headers)
+    post_response_assignments = _parse_post_response_assignments(item.get("event"))
 
     return ParsedRequest(
         name=item.get("name") or "Unnamed",
@@ -174,6 +185,11 @@ def _parse_request_item(
         headers=headers,
         body=body,
         folder_path=folder_path,
+        url_template=url_template,
+        header_templates=header_templates,
+        body_spec=body_spec,
+        base_env=env,
+        post_response_assignments=post_response_assignments,
     )
 
 
@@ -337,6 +353,36 @@ def _text_body_pairs(items: Any, env: dict[str, str]) -> list[tuple[str, str]]:
     return pairs
 
 
+def _parse_post_response_assignments(events: Any) -> list[PostResponseAssignment]:
+    if not isinstance(events, list):
+        return []
+
+    assignments: list[PostResponseAssignment] = []
+    for event in events:
+        if not isinstance(event, dict) or event.get("listen") != "test":
+            continue
+        script = event.get("script")
+        if not isinstance(script, dict):
+            continue
+        exec_lines = script.get("exec")
+        if isinstance(exec_lines, str):
+            lines = exec_lines.splitlines()
+        elif isinstance(exec_lines, list):
+            lines = [str(line) for line in exec_lines]
+        else:
+            continue
+
+        for line in lines:
+            match = PM_ENV_SET_PATTERN.search(line.strip())
+            if not match:
+                continue
+            variable = match.group("key").strip()
+            expression = match.group("expr").strip()
+            if variable:
+                assignments.append(PostResponseAssignment(variable, expression))
+    return assignments
+
+
 def resolve_vars(text: str, env: dict[str, str]) -> str:
     """Replace {{variableName}} with values from env. Env can be augmented at runtime."""
 
@@ -347,8 +393,12 @@ def resolve_vars(text: str, env: dict[str, str]) -> str:
     return VAR_PATTERN.sub(repl, text)
 
 
-def unresolved_variables_in_requests(requests: list[ParsedRequest]) -> dict[str, list[str]]:
+def unresolved_variables_in_requests(
+    requests: list[ParsedRequest],
+    ignore_variables: set[str] | None = None,
+) -> dict[str, list[str]]:
     """Return unresolved Postman variables grouped by request name."""
+    ignored = ignore_variables or set()
     unresolved: dict[str, list[str]] = {}
     for req in requests:
         values = [req.url, *(req.headers.values())]
@@ -356,7 +406,11 @@ def unresolved_variables_in_requests(requests: list[ParsedRequest]) -> dict[str,
             values.append(req.body)
         names: set[str] = set()
         for value in values:
-            names.update(match.group(1).strip() for match in VAR_PATTERN.finditer(value))
+            names.update(
+                match.group(1).strip()
+                for match in VAR_PATTERN.finditer(value)
+                if match.group(1).strip() not in ignored
+            )
         if names:
             unresolved[req.name] = sorted(names)
     return unresolved
@@ -365,3 +419,259 @@ def unresolved_variables_in_requests(requests: list[ParsedRequest]) -> dict[str,
 def set_env_from_dict(env: dict[str, str], values: dict[str, str]) -> None:
     """Merge runtime environment values into env (in-place)."""
     env.update(values)
+
+
+def build_runtime_env(requests: list[ParsedRequest]) -> dict[str, str] | None:
+    """Return a per-worker runtime env if the request list needs dynamic rendering."""
+    for req in requests:
+        if req.base_env is None:
+            continue
+        if req.post_response_assignments:
+            return dict(req.base_env)
+    return None
+
+
+def render_runtime_request(
+    req: ParsedRequest,
+    runtime_env: dict[str, str],
+) -> tuple[str, dict[str, str], bytes | None]:
+    """Render URL, headers, and body against the current runtime environment."""
+    url = resolve_vars(req.url_template, runtime_env)
+    headers = {
+        key: resolve_vars(value, runtime_env)
+        for key, value in req.header_templates.items()
+    }
+    body = _parse_body(req.body_spec, runtime_env, headers)
+    if body is None and req.body is not None:
+        body = resolve_vars(req.body, runtime_env)
+    if body and not _has_header(headers, "content-type"):
+        headers["Content-Type"] = "application/json"
+    return url, headers, body.encode("utf-8") if body is not None else None
+
+
+def apply_post_response_assignments(
+    req: ParsedRequest,
+    response_text: str,
+    runtime_env: dict[str, str],
+) -> None:
+    """Apply supported Postman test-script env assignments from a response body."""
+    if not req.post_response_assignments:
+        return
+
+    response_json: Any = _MISSING
+    for assignment in req.post_response_assignments:
+        value = _evaluate_assignment_expression(assignment.expression, response_text, response_json)
+        if response_json is _MISSING and _expression_needs_response_json(assignment.expression):
+            try:
+                response_json = orjson.loads(response_text)
+            except orjson.JSONDecodeError:
+                response_json = None
+            value = _evaluate_assignment_expression(
+                assignment.expression,
+                response_text,
+                response_json,
+            )
+        if value is _MISSING:
+            continue
+        runtime_env[assignment.variable] = _stringify_env_value(value)
+
+
+def produced_runtime_variables(requests: list[ParsedRequest]) -> set[str]:
+    return {
+        assignment.variable
+        for req in requests
+        for assignment in req.post_response_assignments
+    }
+
+
+def order_requests_for_runtime_dependencies(
+    requests: list[ParsedRequest],
+) -> list[ParsedRequest]:
+    """Move runtime variable producers before consumers while preserving stable order."""
+    if len(requests) < 2:
+        return requests
+
+    producers_by_var: dict[str, list[int]] = {}
+    for idx, req in enumerate(requests):
+        for assignment in req.post_response_assignments:
+            producers_by_var.setdefault(assignment.variable, []).append(idx)
+    if not producers_by_var:
+        return requests
+
+    edges: dict[int, set[int]] = {idx: set() for idx in range(len(requests))}
+    indegree = [0] * len(requests)
+    for consumer_idx, req in enumerate(requests):
+        consumed = _request_template_variables(req)
+        for variable in consumed:
+            for producer_idx in producers_by_var.get(variable, []):
+                if producer_idx == consumer_idx or consumer_idx in edges[producer_idx]:
+                    continue
+                edges[producer_idx].add(consumer_idx)
+                indegree[consumer_idx] += 1
+
+    if not any(edges.values()):
+        return requests
+
+    ready = [idx for idx, degree in enumerate(indegree) if degree == 0]
+    ordered: list[int] = []
+    while ready:
+        ready.sort()
+        current = ready.pop(0)
+        ordered.append(current)
+        for child in sorted(edges[current]):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                ready.append(child)
+
+    if len(ordered) != len(requests):
+        logger.warning("Runtime variable dependency cycle detected; preserving collection order")
+        return requests
+    if ordered == list(range(len(requests))):
+        return requests
+    return [requests[idx] for idx in ordered]
+
+
+def _request_template_variables(req: ParsedRequest) -> set[str]:
+    names = _variables_in_text(req.url_template)
+    for value in req.header_templates.values():
+        names.update(_variables_in_text(value))
+    for value in _body_template_values(req.body_spec):
+        names.update(_variables_in_text(value))
+    return names
+
+
+def _body_template_values(body: Any) -> list[str]:
+    if not isinstance(body, dict):
+        return []
+    mode = body.get("mode")
+    if mode == "raw":
+        raw = body.get("raw")
+        return [str(raw)] if raw is not None else []
+    if mode == "urlencoded":
+        return _body_item_values(body.get("urlencoded"))
+    if mode == "formdata":
+        return _body_item_values(body.get("formdata"))
+    return []
+
+
+def _body_item_values(items: Any) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    values: list[str] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("disabled") or item.get("type") == "file":
+            continue
+        value = item.get("value")
+        if value is not None:
+            values.append(str(value))
+    return values
+
+
+def _variables_in_text(text: str | None) -> set[str]:
+    if not text:
+        return set()
+    return {match.group(1).strip() for match in VAR_PATTERN.finditer(text)}
+
+
+class _Missing:
+    pass
+
+
+_MISSING = _Missing()
+
+
+def _evaluate_assignment_expression(
+    expression: str,
+    response_text: str,
+    response_json: Any,
+) -> Any:
+    expr = expression.strip().rstrip(";")
+    if not expr:
+        return _MISSING
+
+    if _is_quoted_string(expr):
+        return expr[1:-1]
+
+    if expr == "pm.response.text()":
+        return response_text
+
+    if _expression_needs_response_json(expr):
+        if response_json is _MISSING:
+            return _MISSING
+        return _evaluate_json_expression(expr, response_json)
+
+    return _MISSING
+
+
+def _expression_needs_response_json(expression: str) -> bool:
+    expr = expression.strip()
+    return expr == "pm.response.json()" or expr.startswith(
+        ("jsonData.", "jsonData[", "responseJson.", "responseJson[", "pm.response.json().")
+    )
+
+
+def _evaluate_json_expression(expression: str, data: Any) -> Any:
+    expr = expression.strip().rstrip(";")
+    if expr == "pm.response.json()":
+        return data
+    for prefix in ("jsonData", "responseJson", "pm.response.json()"):
+        if expr == prefix:
+            return data
+        if expr.startswith(prefix + ".") or expr.startswith(prefix + "["):
+            return _get_json_path_value(data, expr[len(prefix) :])
+    return _MISSING
+
+
+def _get_json_path_value(data: Any, path: str) -> Any:
+    current = data
+    pos = 0
+    while pos < len(path):
+        if path[pos] == ".":
+            pos += 1
+            start = pos
+            while pos < len(path) and (path[pos].isalnum() or path[pos] in {"_", "$"}):
+                pos += 1
+            if start == pos:
+                return _MISSING
+            key: str | int = path[start:pos]
+        elif path[pos] == "[":
+            end = path.find("]", pos)
+            if end == -1:
+                return _MISSING
+            token = path[pos + 1 : end].strip()
+            if _is_quoted_string(token):
+                key = token[1:-1]
+            else:
+                try:
+                    key = int(token)
+                except ValueError:
+                    return _MISSING
+            pos = end + 1
+        else:
+            return _MISSING
+
+        if isinstance(current, dict) and isinstance(key, str):
+            if key not in current:
+                return _MISSING
+            current = current[key]
+        elif isinstance(current, list) and isinstance(key, int):
+            if key < 0 or key >= len(current):
+                return _MISSING
+            current = current[key]
+        else:
+            return _MISSING
+    return current
+
+
+def _is_quoted_string(value: str) -> bool:
+    return len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}
+
+
+def _stringify_env_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return orjson.dumps(value).decode("utf-8")
+    return str(value)

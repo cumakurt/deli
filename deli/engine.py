@@ -22,6 +22,11 @@ from typing import TYPE_CHECKING, AsyncIterator
 import httpx
 
 from .models import ParsedRequest, RequestResult
+from .postman import (
+    apply_post_response_assignments,
+    build_runtime_env,
+    render_runtime_request,
+)
 
 if TYPE_CHECKING:
     pass
@@ -47,10 +52,20 @@ def _get_body_bytes(req: ParsedRequest) -> bytes | None:
     return req._body_bytes
 
 
+def _prepare_request_payload(
+    req: ParsedRequest,
+    runtime_env: dict[str, str] | None,
+) -> tuple[str, dict[str, str], bytes | None]:
+    if runtime_env is None:
+        return req.url, req.get_prepared_headers(), _get_body_bytes(req)
+    return render_runtime_request(req, runtime_env)
+
+
 async def execute_request(
     client: httpx.AsyncClient,
     req: ParsedRequest,
     think_time_ms: float,
+    runtime_env: dict[str, str] | None = None,
 ) -> RequestResult:
     """Execute a single HTTP request and return result with timing.
 
@@ -69,26 +84,27 @@ async def execute_request(
     if think_time_ms > 0:
         await asyncio.sleep(think_time_ms / 1000.0)
 
-    # Use cached prepared headers and body bytes
-    headers = req.get_prepared_headers()
-    body_bytes = _get_body_bytes(req)
+    # Static requests use cached headers/body; Postman runtime requests render per worker.
+    url, headers, body_bytes = _prepare_request_payload(req, runtime_env)
 
     # perf_counter_ns is faster than perf_counter (no float conversion)
     start_ns = time.perf_counter_ns()
     try:
         r = await client.request(
             req.method,
-            req.url,
+            url,
             headers=headers,
             content=body_bytes,
         )
+        if runtime_env is not None:
+            apply_post_response_assignments(req, r.text, runtime_env)
         elapsed_ms = (time.perf_counter_ns() - start_ns) / NS_TO_MS
         success = 200 <= r.status_code < 400
         return RequestResult(
             request_name=req.name,
             folder_path=req.folder_path,
             method=req.method,
-            url=req.url,
+            url=url,
             status_code=r.status_code,
             response_time_ms=elapsed_ms,
             success=success,
@@ -101,7 +117,7 @@ async def execute_request(
             request_name=req.name,
             folder_path=req.folder_path,
             method=req.method,
-            url=req.url,
+            url=url,
             status_code=None,
             response_time_ms=elapsed_ms,
             success=False,
@@ -138,6 +154,7 @@ async def run_worker(
     idx = 0
     cycle = 0
     num_requests = len(requests)
+    runtime_env = build_runtime_env(requests)
 
     # Local references for faster access in hot loop
     is_set = stop_event.is_set
@@ -155,9 +172,15 @@ async def run_worker(
 
             if semaphore is not None:
                 async with semaphore:
-                    result = await execute_request(client, req, think_time_ms)
+                    if runtime_env is None:
+                        result = await execute_request(client, req, think_time_ms)
+                    else:
+                        result = await execute_request(client, req, think_time_ms, runtime_env)
             else:
-                result = await execute_request(client, req, think_time_ms)
+                if runtime_env is None:
+                    result = await execute_request(client, req, think_time_ms)
+                else:
+                    result = await execute_request(client, req, think_time_ms, runtime_env)
 
             # Use put_nowait when possible for lower latency
             if not queue_full():

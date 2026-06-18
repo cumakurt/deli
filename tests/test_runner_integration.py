@@ -12,7 +12,7 @@ import pytest
 
 from deli.exceptions import DeliRunnerError
 from deli.models import RequestResult
-from deli.runner import run_manual_test, run_postman_test_mode, run_test
+from deli.runner import run_jmeter_test_mode, run_manual_test, run_postman_test_mode, run_test
 
 
 @pytest.fixture
@@ -154,6 +154,53 @@ def test_run_postman_test_mode_with_environment(tmp_path: Path) -> None:
                 live=False,
             )
         )
+
+    assert agg.total_requests == 5
+    assert agg.failed_requests == 0
+    assert seen_urls == ["https://api.example.com/ping"] * 5
+    assert report_path.exists()
+
+
+def test_run_jmeter_test_mode(tmp_path: Path) -> None:
+    jmx = tmp_path / "plan.jmx"
+    jmx.write_text(
+        """<jmeterTestPlan>
+          <hashTree>
+            <TestPlan testname="Plan"/>
+            <hashTree>
+              <ThreadGroup testname="Thread Group"/>
+              <hashTree>
+                <HTTPSamplerProxy testname="Ping">
+                  <stringProp name="HTTPSampler.protocol">https</stringProp>
+                  <stringProp name="HTTPSampler.domain">api.example.com</stringProp>
+                  <stringProp name="HTTPSampler.path">/ping</stringProp>
+                  <stringProp name="HTTPSampler.method">GET</stringProp>
+                </HTTPSamplerProxy>
+                <hashTree/>
+              </hashTree>
+            </hashTree>
+          </hashTree>
+        </jmeterTestPlan>""",
+        encoding="utf-8",
+    )
+    report_path = tmp_path / "jmeter_report.html"
+    seen_urls: list[str] = []
+
+    async def fake_execute(client, req, think_time_ms):
+        seen_urls.append(req.url)
+        return RequestResult(
+            request_name=req.name,
+            folder_path=req.folder_path,
+            method=req.method,
+            url=req.url,
+            status_code=200,
+            response_time_ms=25,
+            success=True,
+            timestamp=time.perf_counter(),
+        )
+
+    with patch("deli.engine.execute_request", side_effect=fake_execute):
+        agg = asyncio.run(run_jmeter_test_mode(jmx, report_path, live=False))
 
     assert agg.total_requests == 5
     assert agg.failed_requests == 0

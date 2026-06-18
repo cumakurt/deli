@@ -100,3 +100,51 @@ def test_main_test_mode_invokes_runner(tmp_path: Path) -> None:
     assert code == 0
     run_async.assert_called_once_with(sentinel)
     run_mode.assert_called_once()
+
+
+def test_main_test_mode_accepts_env_file_with_short_e(tmp_path: Path) -> None:
+    collection = tmp_path / "collection.json"
+    collection.write_text('{"info": {}, "item": []}')
+    environment = tmp_path / "environment.json"
+    environment.write_text('{"values": []}')
+    sentinel = object()
+    with patch.object(
+        sys,
+        "argv",
+        ["deli", "--test-mode", "-c", str(collection), "-e", str(environment), "--no-live"],
+    ):
+        with patch("deli.cli.run_postman_test_mode", new=Mock(return_value=sentinel)) as run_mode:
+            with patch("deli.cli._run_async", return_value=None) as run_async:
+                code = main()
+
+    assert code == 0
+    run_async.assert_called_once_with(sentinel)
+    _, kwargs = run_mode.call_args
+    assert kwargs["environment_path"] == environment
+    assert kwargs["env_override"] is None
+
+
+def test_main_test_mode_invokes_jmeter_runner(tmp_path: Path) -> None:
+    jmx = tmp_path / "plan.jmx"
+    jmx.write_text("<jmeterTestPlan><hashTree/></jmeterTestPlan>")
+    sentinel = object()
+    with patch.object(sys, "argv", ["deli", "--test-mode", "-j", str(jmx), "--no-live"]):
+        with patch("deli.cli.run_jmeter_test_mode", new=Mock(return_value=sentinel)) as run_mode:
+            with patch("deli.cli._run_async", return_value=None) as run_async:
+                code = main()
+
+    assert code == 0
+    run_async.assert_called_once_with(sentinel)
+    _, kwargs = run_mode.call_args
+    assert kwargs["jmeter_path"] == jmx
+
+
+def test_main_rejects_multiple_targets(tmp_path: Path) -> None:
+    collection = tmp_path / "collection.json"
+    collection.write_text('{"info": {}, "item": []}')
+    jmx = tmp_path / "plan.jmx"
+    jmx.write_text("<jmeterTestPlan><hashTree/></jmeterTestPlan>")
+    with patch.object(sys, "argv", ["deli", "-c", str(collection), "-j", str(jmx)]):
+        code = main()
+
+    assert code == 1
